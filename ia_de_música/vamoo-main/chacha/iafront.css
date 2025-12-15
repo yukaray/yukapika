@@ -1,0 +1,286 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+
+*{
+
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'poppins', sans-serif;
+}
+
+html, body{
+
+    display: flex;
+    flex-direction: column;
+    background: #111318;
+    color: #E8ECF8;
+    justify-content: space-between;
+    align-items: center;
+    height: 100dvh;
+    width: 100dvw;
+    overflow: hidden;
+}
+
+header{
+
+    display: flex;
+    justify-content: start;
+    align-items: center;
+    width: 100%;
+    height: auto;
+    padding: 3px;
+    padding-top: 0.7rem;
+    padding-left: 1.2rem;
+    color: gray;
+}
+
+svg {
+  background: transparent;
+}
+
+#logo{
+    width: 40px;
+    background-color: rgb(224, 213, 213);
+    font-size: 2rem; 
+    padding-top: 4px;
+    padding-bottom: 4px;
+    padding-left: 10px;
+    padding-right: 10px; 
+    font-weight: 800;
+    border-radius: 40px;
+    width: 200px;
+    height: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+main{
+    
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    width: 100vw;
+    gap: 1rem;
+
+
+}
+
+#acoes{
+
+    max-height: 60%;
+    width: 77%;
+    font-size: xx-large; 
+    text-align: center;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+
+}
+
+#acoes::-webkit-scrollbar {
+   width: 6px;
+}
+
+#acoes::-webkit-scrollbar-thumb {
+   background: #292c36;
+   border-radius: 20px;
+}
+
+#acoes::-webkit-scrollbar-track {
+   background: transparent;
+}
+
+.svgAudio{
+  display: flex;
+  margin: 1rem 0 ;
+  justify-content: end;
+}
+
+.pergunta{
+
+  background: #21242e;
+  display: flex;
+  align-self: flex-start;
+  border-radius: 3rem;
+  max-width: 50%;
+  word-break: break-word;
+  font-size: 1rem;
+  margin: 1.5rem 0;
+  padding: .3rem 1rem;
+  justify-self: end;
+
+}
+
+.resposta{
+
+    margin: 1.5rem 0;
+    font-size: 1rem;
+    text-align: left;
+    line-height: 2.5rem;
+
+}
+
+.respondendo {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.respondendo span {
+  width: 8px;
+  height: 8px;
+  background: #555;
+  border-radius: 50%;
+  display: inline-block;
+  animation: bounce 0.6s ease-in-out infinite;
+}
+
+.respondendo span:nth-child(1) {
+  animation-delay: 0s;
+}
+.respondendo span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.respondendo span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes bounce {
+  0% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+}
+
+.erro{
+
+  background: #292c36;
+  font-size: 1rem;
+  display: flex;
+  justify-content: start;
+  gap: .2rem;
+  padding: .3rem 1rem;
+  border-radius: 10rem;
+  color: rgba(255, 3, 3, 0.677);
+  align-items: center;
+  margin: 1.5rem 0;
+
+}
+
+.erro i{
+
+  font-size: 2rem;
+
+}
+
+#prompt{
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-content: center;
+    align-items: center;
+    background: #21242e;
+    border-radius: 2rem;
+    gap: 1rem;
+    
+    
+}
+
+
+#chatbot{
+
+    background: #21242e;
+    width: auto;
+    border-radius: 1rem;
+    height: auto;
+    max-height: 10dvh;
+    display: flex;
+    padding: 1rem;
+    overflow-y: hidden;
+    gap: 1rem;
+    justify-content: space-between;
+    align-items: center;   
+
+}
+
+#chatbot .bx{
+
+  opacity: inherit;
+
+}
+
+#chatbot :disabled{
+
+  opacity: 0.3;
+
+}
+
+#botaoEnviar{
+    
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    
+}
+
+#botaoEnviar button{
+    
+    height: auto;
+    border: none;
+    color: inherit;
+    margin: none;
+    padding: none;
+    background: transparent;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: fixed;
+    cursor: pointer;
+    
+}
+
+#textoprompt{
+
+    width: 70dvw;
+    height: 4dvh;
+    border: none;
+    background: transparent;
+    outline: none;
+    caret-color: white;
+    overflow-y: auto;
+    resize: none;
+    min-height: 4dvh;
+    display: flex;
+    align-items: center; 
+
+}
+
+.bx-send{
+
+  opacity: inherit;
+
+}
+
+#enviar{
+
+  font-size: 1.2rem;
+
+}
+
+.bx{
+
+  font-size: 1.5rem;
+  gap: 0;
+
+}
