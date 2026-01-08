@@ -42,4 +42,6 @@ async def criar_produto(produto: Produto):
     return {"mensagem": f"Produto {produto.nome} cadastrado!", "dados": produto}
 
 6. Conclusão
-O FastAPI representa uma evolução no desenvolvimento backend com Python. Ele resolve o antigo dilema entre "facilidade de desenvolvimento" e "performance de execução". Para arquiteturas modernas de microsserviços e aplicações que exigem alta escalabilidade, ele se consolida como a escolha técnica mais eficiente atualmente.
+O FastAPI consolida-se como um marco na evolução do desenvolvimento backend em Python, ao unir, de forma eficaz, simplicidade no processo de desenvolvimento e alto desempenho em tempo de execução — um dilema historicamente presente em frameworks da linguagem. Sua arquitetura moderna, baseada em padrões abertos como ASGI e OpenAPI, aliada ao uso de tipagem estática com type hints, permite a criação de aplicações robustas, seguras e altamente manuteníveis.
+
+Além disso, o FastAPI se destaca pela capacidade de escalar de maneira eficiente, atendendo plenamente às demandas de arquiteturas orientadas a microsserviços e sistemas distribuídos. Recursos como validação automática de dados, documentação interativa nativa e excelente desempenho comparável a frameworks de baixo nível reforçam sua relevância no cenário atual. Dessa forma, o FastAPI não apenas se apresenta como uma alternativa moderna, mas como uma das escolhas técnicas mais eficientes e estratégicas para o desenvolvimento de APIs e aplicações backend de alta performance na atualidade.
