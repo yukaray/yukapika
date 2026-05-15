@@ -1,0 +1,632 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
+
+char bdAtual[100], caminhobd_tb[220];
+
+struct professor
+{
+    char sala[50];
+    char nome[100];
+    char materia[50];
+};
+
+void copiarArquivo(FILE* origem, FILE* destino)
+{
+    char linha[256];
+
+    while (fgets(linha, sizeof(linha), origem))
+    {
+        fputs(linha, destino);
+    }
+}
+
+int contagem(FILE* Tb_ptr)
+{
+    char linha[256];
+    int id_ext, id_valid = 0;
+
+    rewind(Tb_ptr);
+
+    while (fgets(linha, sizeof(linha), Tb_ptr))
+    {
+        if (sscanf(linha, "id: %d", &id_ext) == 1)
+        {
+            if (id_ext > id_valid)
+                id_valid = id_ext;
+        }
+    }
+
+    return id_valid + 1;
+}
+
+void remover(const int id_alvo)
+{
+    FILE* orig = fopen(caminhobd_tb, "r");
+    FILE* temp = fopen("temp.txt", "w");
+
+    if (!orig || !temp) {
+        printf("Erro ao abrir arquivos\n");
+        if (orig) fclose(orig);
+        if (temp) fclose(temp);
+        return;
+    }
+
+    char linha[256];
+    int id;
+
+    while (fgets(linha, sizeof(linha), orig))
+    {
+        if (sscanf(linha, "id: %d", &id) == 1 && id == id_alvo)
+            continue;
+
+        fputs(linha, temp);
+    }
+
+    fclose(orig);
+    fclose(temp);
+
+    remove(caminhobd_tb);
+    rename("temp.txt", caminhobd_tb);
+
+    printf("Professor removido com sucesso!\n");
+}
+
+void mudanca(const char dadotipo, const char novoDado[100], const int id_alvo)
+{
+    FILE* orig = fopen(caminhobd_tb, "r");
+    FILE* temp = fopen("temp.txt", "w");
+
+    if (!orig || !temp) {
+        printf("Erro ao abrir arquivos\n");
+        return;
+    }
+
+    char linha[256];
+    int id;
+    char nome[100], materia[50], sala[50];
+
+    while (fgets(linha, sizeof(linha), orig))
+    {
+        if (sscanf(linha,
+            "id: %d, nome: %99[^,], materia: %49[^,], sala: %49[^\n]",
+            &id, nome, materia, sala) != 4)
+        {
+            fputs(linha, temp);
+            continue;
+        }
+
+        if (id == id_alvo)
+        {
+            if (dadotipo == 'n') strcpy(nome, novoDado);
+            else if (dadotipo == 'm') strcpy(materia, novoDado);
+            else if (dadotipo == 's') strcpy(sala, novoDado);
+        }
+
+        fprintf(temp,
+            "id: %d, nome: %s, materia: %s, sala: %s\n",
+            id, nome, materia, sala);
+    }
+
+    fclose(orig);
+    fclose(temp);
+
+    remove(caminhobd_tb);
+    rename("temp.txt", caminhobd_tb);
+
+    printf("Dados alterados com sucesso!\n");
+}
+
+void alterar()
+{
+    char acabou_alterando = 'n';
+    char alteracao;
+    char novoDado[100];
+    int id_alvo;
+
+    do
+    {
+        printf("Quer alterar nome, materia ou sala? (n/m/s)\n");
+        scanf(" %c", &alteracao);
+
+        printf("Qual é o id?\n");
+        scanf("%d", &id_alvo);
+
+        while (getchar() != '\n'); // FIX BUFFER
+
+        switch (alteracao)
+        {
+        case 'n':
+            printf("Qual é o novo nome?\n");
+            fgets(novoDado, sizeof(novoDado), stdin);
+            break;
+
+        case 'm':
+            printf("Qual é a nova matéria?\n");
+            fgets(novoDado, sizeof(novoDado), stdin);
+            break;
+
+        case 's':
+            printf("Qual é a nova sala?\n");
+            fgets(novoDado, sizeof(novoDado), stdin);
+            break;
+
+        default:
+            printf("Opção inválida\n");
+            continue;
+        }
+
+        novoDado[strcspn(novoDado, "\n")] = '\0';
+
+        mudanca(alteracao, novoDado, id_alvo);
+
+        printf("Deseja continuar alterando? (s/n)\n");
+        scanf(" %c", &acabou_alterando);
+
+    } while (acabou_alterando == 's');
+}
+
+void procuraTB(FILE* Tb_ptr)
+{
+    if (Tb_ptr == NULL)
+    {
+        printf("Erro, tabela não encontrada\n");
+        return;
+    }
+
+    rewind(Tb_ptr);
+
+    char nome_ext[100];
+    char sala_ext[50];
+    char materia_ext[50];
+    char profAlvo[100];
+
+    int id_ext;
+
+    char especifico;
+    char linha[256];
+
+    printf("Procurar alguém específico? (s/n)\n");
+    scanf(" %c", &especifico);
+
+    if (especifico == 'n')
+    {
+        while (fgets(linha, sizeof(linha), Tb_ptr))
+        {
+            printf("%s", linha);
+        }
+    }
+    else
+    {
+        printf("Qual professor deseja procurar?\n");
+
+        getchar();
+
+        fgets(profAlvo, sizeof(profAlvo), stdin);
+        profAlvo[strcspn(profAlvo, "\n")] = '\0';
+
+        while (fgets(linha, sizeof(linha), Tb_ptr))
+        {
+            if (sscanf(linha,
+                "id: %d, nome: %99[^,], materia: %49[^,], sala: %49[^\n]",
+                &id_ext,
+                nome_ext,
+                materia_ext,
+                sala_ext) == 4)
+            {
+                if (strcmp(nome_ext, profAlvo) == 0)
+                {
+                    printf("%s", linha);
+                }
+            }
+        }
+
+        printf("Professor não encontrado.\n");
+    }
+}
+
+void cadastroTB(FILE* Tb_ptr)
+{
+    struct professor prof;
+    int id_novo;
+
+    if (!Tb_ptr)
+    {
+        printf("Erro, tabela não encontrada\n");
+        return;
+    }
+
+    printf("Coloque o nome do professor:\n");
+    while (getchar() != '\n');
+    fgets(prof.nome, sizeof(prof.nome), stdin);
+    prof.nome[strcspn(prof.nome, "\n")] = '\0';
+
+    printf("Coloque a matéria:\n");
+    fgets(prof.materia, sizeof(prof.materia), stdin);
+    prof.materia[strcspn(prof.materia, "\n")] = '\0';
+
+    printf("Coloque a sala:\n");
+    fgets(prof.sala, sizeof(prof.sala), stdin);
+    prof.sala[strcspn(prof.sala, "\n")] = '\0';
+
+    id_novo = contagem(Tb_ptr);
+
+    fseek(Tb_ptr, 0, SEEK_END);
+
+    fprintf(Tb_ptr,
+        "id: %d, nome: %s, materia: %s, sala: %s\n",
+        id_novo,
+        prof.nome,
+        prof.materia,
+        prof.sala);
+
+    fflush(Tb_ptr);
+
+    printf("Professor cadastrado com sucesso!\n");
+}
+
+void abrirTB(char filename[110])
+{
+    FILE* salas;
+    char cad_pro, acabou;
+    int id_alvo;
+
+    snprintf(caminhobd_tb, sizeof(caminhobd_tb),
+             "%s/%s.txt", bdAtual, filename);
+
+    salas = fopen(caminhobd_tb, "a+");
+
+    if (!salas) {
+        printf("Erro ao abrir tabela!\n");
+        return;
+    }
+
+    do
+    {
+        printf("cadastrar / procurar / alterar / remover o professor (c/p/a/r)\n");
+        scanf(" %c", &cad_pro);
+
+        switch (cad_pro)
+        {
+        case 'c':
+            cadastroTB(salas);
+            break;
+
+        case 'p':
+            procuraTB(salas);
+            break;
+
+        case 'a':
+            alterar();
+            break;
+
+        case 'r':
+            printf("ID: ");
+            scanf("%d", &id_alvo);
+            remover(id_alvo);
+            break;
+        }
+
+        printf("Continuar? (s/n)\n");
+        scanf(" %c", &acabou);
+
+    } while (acabou == 's');
+
+    fclose(salas);
+}
+
+void excluirSala()
+{
+    char nomeSala[110];
+    char caminho[220];
+
+    if (strlen(bdAtual) == 0)
+    {
+        printf("BD nao inicializado!\n");
+        return;
+    }
+
+    printf("Digite o nome da sala para excluir: ");
+    scanf(" %s", nomeSala);
+
+    snprintf(caminho, sizeof(caminho),
+        "%s/%s.txt", bdAtual, nomeSala);
+
+    if (remove(caminho) == 0)
+    {
+        printf("Sala excluida com sucesso!\n");
+    }
+    else
+    {
+        printf("Erro ao excluir sala (nao existe?)\n");
+    }
+}
+
+void entrarSala(char nomeSala[110])
+{
+    char caminho[220];
+
+    snprintf(caminho, sizeof(caminho),
+        "%s/%s.txt", bdAtual, nomeSala);
+
+    FILE* salas = fopen(caminho, "a+");
+
+    if (!salas) {
+        printf("Curso nao encontrada!\n");
+        return;
+    }
+
+    fclose(salas);
+
+    abrirTB(nomeSala);
+}
+
+void procurarSala()
+{
+    DIR* d;
+    struct dirent* dir;
+
+    char caminho[220];
+    int encontrou = 0;
+
+    if (strlen(bdAtual) == 0)
+    {
+        printf("BD nao inicializado!\n");
+        return;
+    }
+
+    d = opendir(bdAtual);
+
+    if (!d)
+    {
+        printf("Erro ao abrir banco de dados\n");
+        return;
+    }
+
+    printf("\nCursos encontradas:\n");
+
+    while ((dir = readdir(d)) != NULL)
+    {
+        if (strcmp(dir->d_name, ".") != 0 &&
+            strcmp(dir->d_name, "..") != 0 &&
+            strstr(dir->d_name, ".txt") != NULL)
+        {
+            printf("- %s\n", dir->d_name);
+            encontrou = 1;
+        }
+    }
+
+    if (!encontrou)
+        printf("Nenhum curso encontrado.\n");
+
+    closedir(d);
+}
+
+void criarSala()
+{
+    FILE* salas;
+
+    char nomeSala[110];
+    char caminho[220];
+
+    printf("Digite o nome do curso: ");
+    scanf(" %s", nomeSala);
+
+    if (strlen(bdAtual) == 0)
+    {
+        printf("BD nao inicializado!\n");
+        return;
+    }
+
+    snprintf(caminho, sizeof(caminho),
+        "%s/%s.txt", bdAtual, nomeSala);
+
+    salas = fopen(caminho, "a+");
+
+    if (salas == NULL)
+    {
+        printf("Erro ao cadastrar curso!\n");
+        return;
+    }
+
+    fclose(salas);
+
+    printf("Sala '%s' criada com sucesso!\n", nomeSala);
+
+    entrarSala(nomeSala);
+}
+
+void entrarBD(char nome_bd[100])
+{
+
+    DIR* bd;
+    struct dirent* tabelas;
+    char escolha, acabou;
+    char nomeSala[110];
+
+
+    bd = opendir(nome_bd);
+
+    if (!bd) {
+        printf("Erro ao abrir o banco de dados\n");
+        return;
+    }
+
+    snprintf(bdAtual, sizeof(bdAtual), "%s", nome_bd);
+
+    while ((tabelas = readdir(bd)) != NULL)
+    {
+        printf("- %s\n", tabelas->d_name);
+    }
+
+    do
+    {
+        printf("\nQuer criar, procurar, remover ou entrar na sala? (c/p/r/e)\n");
+        scanf(" %c", &escolha);
+
+        switch (escolha)
+        {
+        case 'c':
+            criarSala();
+            break;
+
+        case 'p':
+            procurarSala();
+            break;
+
+        case 'e':
+            printf("Digite o nome da sala: ");
+            scanf(" %s", nomeSala);
+
+            entrarSala(nomeSala);
+            break;
+
+        case 'r':
+            excluirSala();
+            break;
+
+        default:
+            printf("Opcao invalida\n");
+            break;
+        }
+
+        printf("Deseja continuar? (s/n)\n");
+        scanf(" %c", &acabou);
+
+    } while (acabou == 's');
+
+    closedir(bd);
+
+    return;
+}
+
+void procurarBD()
+{
+    DIR* d;
+    struct dirent* dir;
+    char nome_db[110];
+
+    d = opendir(".");
+
+    if (d)
+    {
+        printf("Listando escolas:\n\n");
+
+        int encontrou = 0;
+
+        while ((dir = readdir(d)) != NULL)
+        {
+            if (strcmp(dir->d_name, ".") != 0 &&
+                strcmp(dir->d_name, "..") != 0 &&
+                strstr(dir->d_name, "_bd") != NULL)
+            {
+                printf("%s\n", dir->d_name);
+                encontrou = 1;
+            }
+        }
+
+        if (!encontrou)
+        {
+            printf("Nenhum banco encontrado.\n\n");
+            return;
+        }
+
+        closedir(d);
+    }
+    else
+    {
+        printf("Erro ao listar.\n\n");
+    }
+
+    getchar();
+
+    printf("Qual escola deseja entrar?\n\n");
+    scanf(" %s", nome_db);
+
+    entrarBD(nome_db);
+
+    return;
+}
+
+void criarBD(char bdnome[100])
+{
+    DIR* dir;
+    struct dirent* entrada;
+    char pasta_bd[110];
+
+    snprintf(pasta_bd, sizeof(pasta_bd), "%s_bd", bdnome);
+
+    if (mkdir(pasta_bd, 0777) == 0)
+    {
+        printf("Banco de Dados criado\n");
+    }
+    else
+    {
+        printf("Erro ao criar o Banco de Dados.\n");
+    }
+
+    dir = opendir(pasta_bd);
+
+    if (dir == NULL)
+    {
+        printf("Não foi possível abrir a pasta.\n");
+        return;
+    }
+
+    while ((entrada = readdir(dir)) != NULL)
+    {
+        if (strcmp(entrada->d_name, ".") != 0 && strcmp(entrada->d_name, "..") != 0)printf("%s\n", entrada->d_name);
+    }
+
+    closedir(dir);
+
+    if (strlen(pasta_bd) == 0) {
+        printf("BD nao inicializado!\n");
+        return;
+    }
+
+    entrarBD(pasta_bd);
+
+    return;
+}
+
+int main()
+{
+
+    char bdname[100];
+    char saiu_bd = ' ', pro_cri_ent_DB = ' ';
+
+    do
+    {
+        printf("Criar Banco de Dados,procurar existente ou entrar?(c/p/e)\n");
+        scanf(" %c", &pro_cri_ent_DB);
+
+        switch (pro_cri_ent_DB)
+        {
+        case 'c':
+            printf("Qual é o nome do banco?\n\n");
+            scanf(" %s", bdname);
+            criarBD(bdname);
+            break;
+
+        case 'p':
+            procurarBD();
+            break;
+
+        case 'e':
+            printf("Qual é o nome do banco?\n\n");
+            scanf(" %s", bdname);
+            entrarBD(bdname);
+            break;
+
+        default:
+            continue;
+            break;
+        }
+
+        printf("finalizar?(s/n)\n");
+        scanf(" %c", &saiu_bd);
+    } while (saiu_bd == 'n');
+}
