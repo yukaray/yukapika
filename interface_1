@@ -1,0 +1,872 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <gtk/gtk.h>
+#include <errno.h>
+#include <glib.h>
+
+
+void ativar_check_exc(GtkButton *btn, gpointer data);
+void desativar_check_exc(GtkButton *btn, gpointer data);
+void tratar_excluir(GtkButton *btn, gpointer data);
+void apagar_pasta(const char *path);
+void mostrar_erro(GtkWindow *parent, const char *mensagem);
+
+char BASE_DIR[300];
+
+void init_base_dir()
+{
+    const char *docs = g_get_user_special_dir(G_USER_DIRECTORY_DOCUMENTS);
+
+    snprintf(BASE_DIR, sizeof(BASE_DIR), "%s/banco_do_Yuka", docs);
+
+    g_mkdir_with_parents(BASE_DIR, 0755);
+}
+
+typedef struct {
+    GtkWidget *container;
+    GtkWidget *btn_criar;
+    GtkWidget *btn_excluir;
+    GtkWidget *popup;
+
+    GList *checks;
+    GList *botoes;
+
+    char bdAtual[100];
+} AppData;
+
+struct professor
+{
+    char sala[50];
+    char nome[100];
+    char materia[50];
+};
+/*
+void copiarArquivo(FILE* origem, FILE* destino)
+{
+    char linha[256];
+
+    while (fgets(linha, sizeof(linha), origem))
+    {
+        fputs(linha, destino);
+    }
+}
+
+int contagem(FILE* Tb_ptr)
+{
+    char linha[256];
+    int id_ext, id_valid = 0;
+
+    rewind(Tb_ptr);
+
+    while (fgets(linha, sizeof(linha), Tb_ptr))
+    {
+        if (sscanf(linha, "id: %d", &id_ext) == 1)
+        {
+            if (id_ext > id_valid)
+                id_valid = id_ext;
+        }
+    }
+
+    return id_valid + 1;
+}
+
+void remover(const int id_alvo)
+{
+    FILE* orig = fopen(caminhobd_tb, "r");
+    FILE* temp = fopen("temp.txt", "w");
+
+    if (!orig || !temp) {
+        printf("Erro ao abrir arquivos\n");
+        if (orig) fclose(orig);
+        if (temp) fclose(temp);
+        return;
+    }
+
+    char linha[256];
+    int id;
+
+    while (fgets(linha, sizeof(linha), orig))
+    {
+        if (sscanf(linha, "id: %d", &id) == 1 && id == id_alvo)
+            continue;
+
+        fputs(linha, temp);
+    }
+
+    fclose(orig);
+    fclose(temp);
+
+    remove(caminhobd_tb);
+    rename("temp.txt", caminhobd_tb);
+
+    printf("Professor removido com sucesso!\n");
+}
+
+void mudanca(const char dadotipo, const char novoDado[100], const int id_alvo)
+{
+    FILE* orig = fopen(caminhobd_tb, "r");
+    FILE* temp = fopen("temp.txt", "w");
+
+    if (!orig || !temp) {
+        printf("Erro ao abrir arquivos\n");
+        return;
+    }
+
+    char linha[256];
+    int id;
+    char nome[100], materia[50], sala[50];
+
+    while (fgets(linha, sizeof(linha), orig))
+    {
+        if (sscanf(linha,
+            "id: %d, nome: %99[^,], materia: %49[^,], sala: %49[^\n]",
+            &id, nome, materia, sala) != 4)
+        {
+            fputs(linha, temp);
+            continue;
+        }
+
+        if (id == id_alvo)
+        {
+            if (dadotipo == 'n') strcpy(nome, novoDado);
+            else if (dadotipo == 'm') strcpy(materia, novoDado);
+            else if (dadotipo == 's') strcpy(sala, novoDado);
+        }
+
+        fprintf(temp,
+            "id: %d, nome: %s, materia: %s, sala: %s\n",
+            id, nome, materia, sala);
+    }
+
+    fclose(orig);
+    fclose(temp);
+
+    remove(caminhobd_tb);
+    rename("temp.txt", caminhobd_tb);
+
+    printf("Dados alterados com sucesso!\n");
+}
+
+void alterar()
+{
+    char acabou_alterando = 'n';
+    char alteracao;
+    char novoDado[100];
+    int id_alvo;
+
+    do
+    {
+        printf("Quer alterar nome, materia ou sala? (n/m/s)\n");
+        scanf(" %c", &alteracao);
+
+        printf("Qual é o id?\n");
+        scanf("%d", &id_alvo);
+
+        while (getchar() != '\n'); // FIX BUFFER
+
+        switch (alteracao)
+        {
+        case 'n':
+            printf("Qual é o novo nome?\n");
+            fgets(novoDado, sizeof(novoDado), stdin);
+            break;
+
+        case 'm':
+            printf("Qual é a nova matéria?\n");
+            fgets(novoDado, sizeof(novoDado), stdin);
+            break;
+
+        case 's':
+            printf("Qual é a nova sala?\n");
+            fgets(novoDado, sizeof(novoDado), stdin);
+            break;
+
+        default:
+            printf("Opção inválida\n");
+            continue;
+        }
+
+        novoDado[strcspn(novoDado, "\n")] = '\0';
+
+        mudanca(alteracao, novoDado, id_alvo);
+
+        printf("Deseja continuar alterando? (s/n)\n");
+        scanf(" %c", &acabou_alterando);
+
+    } while (acabou_alterando == 's');
+}
+
+void procuraTB(FILE* Tb_ptr)
+{
+    if (Tb_ptr == NULL)
+    {
+        printf("Erro, tabela não encontrada\n");
+        return;
+    }
+
+    rewind(Tb_ptr);
+
+    char nome_ext[100];
+    char sala_ext[50];
+    char materia_ext[50];
+    char profAlvo[100];
+
+    int id_ext;
+
+    char especifico;
+    char linha[256];
+
+    printf("Procurar alguém específico? (s/n)\n");
+    scanf(" %c", &especifico);
+
+    if (especifico == 'n')
+    {
+        while (fgets(linha, sizeof(linha), Tb_ptr))
+        {
+            printf("%s", linha);
+        }
+    }
+    else
+    {
+        printf("Qual professor deseja procurar?\n");
+
+        getchar();
+
+        fgets(profAlvo, sizeof(profAlvo), stdin);
+        profAlvo[strcspn(profAlvo, "\n")] = '\0';
+
+        while (fgets(linha, sizeof(linha), Tb_ptr))
+        {
+            if (sscanf(linha,
+                "id: %d, nome: %99[^,], materia: %49[^,], sala: %49[^\n]",
+                &id_ext,
+                nome_ext,
+                materia_ext,
+                sala_ext) == 4)
+            {
+                if (strcmp(nome_ext, profAlvo) == 0)
+                {
+                    printf("%s", linha);
+                }
+            }
+        }
+
+        printf("Professor não encontrado.\n");
+    }
+}
+
+void cadastroTB(FILE* Tb_ptr)
+{
+    struct professor prof;
+    int id_novo;
+
+    if (!Tb_ptr)
+    {
+        printf("Erro, tabela não encontrada\n");
+        return;
+    }
+
+    printf("Coloque o nome do professor:\n");
+    while (getchar() != '\n');
+    fgets(prof.nome, sizeof(prof.nome), stdin);
+    prof.nome[strcspn(prof.nome, "\n")] = '\0';
+
+    printf("Coloque a matéria:\n");
+    fgets(prof.materia, sizeof(prof.materia), stdin);
+    prof.materia[strcspn(prof.materia, "\n")] = '\0';
+
+    printf("Coloque a sala:\n");
+    fgets(prof.sala, sizeof(prof.sala), stdin);
+    prof.sala[strcspn(prof.sala, "\n")] = '\0';
+
+    id_novo = contagem(Tb_ptr);
+
+    fseek(Tb_ptr, 0, SEEK_END);
+
+    fprintf(Tb_ptr,
+        "id: %d, nome: %s, materia: %s, sala: %s\n",
+        id_novo,
+        prof.nome,
+        prof.materia,
+        prof.sala);
+
+    fflush(Tb_ptr);
+
+    printf("Professor cadastrado com sucesso!\n");
+}
+
+void abrirTB(char *filename)
+{
+    FILE* salas;
+    char cad_pro, acabou;
+    int id_alvo;
+
+    snprintf(caminhobd_tb, sizeof(caminhobd_tb),
+             "%s/%s.txt", bdAtual, filename);
+
+    salas = fopen(caminhobd_tb, "a+");
+
+    if (!salas) {
+        printf("Erro ao abrir tabela!\n");
+        return;
+    }
+
+    do
+    {
+        printf("cadastrar / procurar / alterar / remover o professor (c/p/a/r)\n");
+        scanf(" %c", &cad_pro);
+
+        switch (cad_pro)
+        {
+        case 'c':
+            cadastroTB(salas);
+            break;
+
+        case 'p':
+            procuraTB(salas);
+            break;
+
+        case 'a':
+            alterar();
+            break;
+
+        case 'r':
+            printf("ID: ");
+            scanf("%d", &id_alvo);
+            remover(id_alvo);
+            break;
+        }
+
+        printf("Continuar? (s/n)\n");
+        scanf(" %c", &acabou);
+
+    } while (acabou == 's');
+
+    fclose(salas);
+}
+
+void excluirSala()
+{
+    char nomeSala[110];
+    char caminho[220];
+
+    if (strlen(bdAtual) == 0)
+    {
+        printf("BD nao inicializado!\n");
+        return;
+    }
+
+    printf("Digite o nome da sala para excluir: ");
+    scanf(" %s", nomeSala);
+
+    snprintf(caminho, sizeof(caminho),
+        "%s/%s.txt", bdAtual, nomeSala);
+
+    if (remove(caminho) == 0)
+    {
+        printf("Sala excluida com sucesso!\n");
+    }
+    else
+    {
+        printf("Erro ao excluir sala (nao existe?)\n");
+    }
+}
+
+void entrarSala(char *nomeSala)
+{
+    char caminho[220];
+
+    snprintf(caminho, sizeof(caminho),
+        "%s/%s.txt", bdAtual, nomeSala);
+
+    FILE* salas = fopen(caminho, "a+");
+
+    if (!salas) {
+        printf("Curso nao encontrada!\n");
+        return;
+    }
+
+    fclose(salas);
+
+    abrirTB(nomeSala);
+}
+
+void procurarSala()
+{
+    DIR* d;
+    struct dirent* dir;
+
+    char caminho[220];
+    int encontrou = 0;
+
+    if (strlen(bdAtual) == 0)
+    {
+        printf("BD nao inicializado!\n");
+        return;
+    }
+
+    d = opendir(bdAtual);
+
+    if (!d)
+    {
+        printf("Erro ao abrir banco de dados\n");
+        return;
+    }
+
+    printf("\nCursos encontradas:\n");
+
+    while ((dir = readdir(d)) != NULL)
+    {
+        if (strcmp(dir->d_name, ".") != 0 &&
+            strcmp(dir->d_name, "..") != 0 &&
+            strstr(dir->d_name, ".txt") != NULL)
+        {
+            printf("- %s\n", dir->d_name);
+            encontrou = 1;
+        }
+    }
+
+    if (!encontrou)
+        printf("Nenhum curso encontrado.\n");
+
+    closedir(d);
+}
+
+void criarSala()
+{
+    FILE* salas;
+
+    char nomeSala[110];
+    char caminho[220];
+
+    printf("Digite o nome do curso: ");
+    scanf(" %s", nomeSala);
+
+    if (strlen(bdAtual) == 0)
+    {
+        printf("BD nao inicializado!\n");
+        return;
+    }
+
+    snprintf(caminho, sizeof(caminho),
+        "%s/%s.txt", bdAtual, nomeSala);
+
+    salas = fopen(caminho, "a+");
+
+    if (salas == NULL)
+    {
+        printf("Erro ao cadastrar curso!\n");
+        return;
+    }
+
+    fclose(salas);
+
+    printf("Sala '%s' criada com sucesso!\n", nomeSala);
+
+    entrarSala(nomeSala);
+}
+
+void entrarBD(char *nome_bd)
+{
+
+    DIR* bd;
+    struct dirent* tabelas;
+    char escolha, acabou;
+    char nomeSala[110];
+
+
+    bd = opendir(nome_bd);
+
+    if (!bd) {
+        printf("Erro ao abrir o banco de dados\n");
+        return;
+    }
+
+    snprintf(bdAtual, sizeof(bdAtual), "%s", nome_bd);
+
+    while ((tabelas = readdir(bd)) != NULL)
+    {
+        printf("- %s\n", tabelas->d_name);
+    }
+
+    do
+    {
+        printf("\nQuer criar, procurar, remover ou entrar na sala? (c/p/r/e)\n");
+        scanf(" %c", &escolha);
+
+        switch (escolha)
+        {
+        case 'c':
+            criarSala();
+            break;
+
+        case 'p':
+            procurarSala();
+            break;
+
+        case 'e':
+            printf("Digite o nome da sala: ");
+            scanf(" %s", nomeSala);
+
+            entrarSala(nomeSala);
+            break;
+
+        case 'r':
+            excluirSala();
+            break;
+
+        default:
+            printf("Opcao invalida\n");
+            break;
+        }
+
+        printf("Deseja continuar? (s/n)\n");
+        scanf(" %c", &acabou);
+
+    } while (acabou == 's');
+
+    closedir(bd);
+
+    return;
+}
+*/
+void procurarBD(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+
+    DIR *d;
+    struct dirent *dir;
+
+    g_list_free(app->checks);
+    app->checks = NULL;
+
+    g_list_free(app->botoes);
+    app->botoes = NULL;
+
+    GtkWidget *child = gtk_widget_get_first_child(app->container);
+
+    while (child)
+    {
+        GtkWidget *next = gtk_widget_get_next_sibling(child);
+        gtk_flow_box_remove(GTK_FLOW_BOX(app->container), child);
+        child = next;
+    }
+
+    d = opendir(BASE_DIR);
+
+    if (!d)
+    {
+        GtkWidget *label = gtk_label_new("Erro ao abrir diretório");
+        gtk_flow_box_insert(GTK_FLOW_BOX(app->container), label, -1);
+        return;
+    }
+
+    GtkWidget *label = gtk_label_new("Listando bancos...");
+    gtk_flow_box_insert(GTK_FLOW_BOX(app->container), label, -1);
+
+    while ((dir = readdir(d)) != NULL)
+    {
+        if (strcmp(dir->d_name, ".") != 0 &&
+            strcmp(dir->d_name, "..") != 0 &&
+            strstr(dir->d_name, "_bd") != NULL)
+        {
+            gtk_flow_box_remove(GTK_FLOW_BOX(app->container), label);
+            GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+            gtk_widget_set_size_request(box, 10, 10);
+            gtk_widget_set_hexpand(box, FALSE);
+            gtk_widget_set_vexpand(box, FALSE); 
+
+            GtkWidget *check = gtk_check_button_new();
+            gtk_widget_set_visible(check, TRUE);
+            gtk_widget_set_size_request(check, 10, 10);
+            gtk_widget_set_halign(check, GTK_ALIGN_END);
+            gtk_widget_set_valign(check, GTK_ALIGN_START);
+
+            char *nome = g_strdup(dir->d_name);
+            g_object_set_data_full(G_OBJECT(check), "id", nome, g_free);
+
+            GtkWidget *btn_bd = gtk_button_new_with_label(dir->d_name);
+            gtk_widget_set_size_request(btn_bd, 150, 150);
+            gtk_widget_set_hexpand(btn_bd, FALSE);
+            gtk_widget_set_vexpand(btn_bd, FALSE);
+            gtk_widget_set_halign(btn_bd, GTK_ALIGN_CENTER);
+            gtk_widget_set_valign(btn_bd, GTK_ALIGN_CENTER);
+
+            app->checks = g_list_append(app->checks, check);
+            app->botoes = g_list_append(app->botoes, btn_bd);
+            
+            gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(app->container), GTK_SELECTION_NONE);
+            gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(app->container), FALSE);  
+
+            gtk_box_append(GTK_BOX(box), btn_bd);
+            gtk_box_append(GTK_BOX(box), check);
+            gtk_flow_box_insert(GTK_FLOW_BOX(app->container), box, -1);
+        }
+    }
+
+    closedir(d);
+}
+
+void criarBD(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+
+    GtkWidget *entry = g_object_get_data(G_OBJECT(btn), "entry");
+
+    if (!entry)
+    {
+        mostrar_erro(GTK_WINDOW(app->popup), "nome não renderizado, tente de novo!");
+        return;
+    }
+
+
+    const char *texto = gtk_editable_get_text(GTK_EDITABLE(entry));
+
+    if (!texto || strlen(texto) == 0)
+    {
+        mostrar_erro(GTK_WINDOW(app->popup), "Nome do banco não pode ser vazio!");
+        return;
+    }
+
+    char nome[100];
+    strncpy(nome, texto, sizeof(nome));
+    nome[sizeof(nome) - 1] = '\0';
+
+    for (int i = 0; nome[i]; i++)
+        if (nome[i] == ' ')
+            nome[i] = '_';
+
+    char pasta[3000];
+    snprintf(pasta, sizeof(pasta), "%s\\%s_bd", BASE_DIR, nome);
+
+    struct stat st;
+
+    if (stat(pasta, &st) == 0)
+    {
+        mostrar_erro(GTK_WINDOW(app->popup), "Esse banco já existe!");
+        return;
+    }
+
+    if (mkdir(pasta) != 0){
+        mostrar_erro(GTK_WINDOW(app->popup), "Erro ao criar banco de dados!");   
+        return;
+    }
+
+    gtk_window_destroy(GTK_WINDOW(app->popup));
+    app->popup = NULL;
+
+    procurarBD(NULL,data);
+}
+
+void removerBD(const char *path, GtkWindow *parent)
+{
+    DIR *dir = opendir(path);
+    struct dirent *entry;
+    char caminho[1024];
+    struct stat st;
+
+    if (!dir)
+    {
+        mostrar_erro(parent, "Não foi possível abrir a pasta");
+        return;
+    }
+
+    while ((entry = readdir(dir)) != NULL)
+    {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+            continue;
+
+        snprintf(caminho, sizeof(caminho), "%s/%s", path, entry->d_name);
+
+        if (stat(caminho, &st) == 0 && S_ISDIR(st.st_mode))
+        {
+            removerBD(caminho, parent);
+        }
+        else
+        {
+            if (remove(caminho) != 0)
+                mostrar_erro(parent, "Erro ao remover arquivo interno");
+        }
+    }
+
+    closedir(dir);
+
+    if (rmdir(path) != 0)
+        mostrar_erro(parent, "Erro ao remover pasta principal");
+}
+
+//gtk
+
+void mostrar_erro(GtkWindow *parent, const char *mensagem)
+{
+    GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", mensagem);
+
+    gtk_alert_dialog_show(dialog, parent);
+}
+
+void tratar_excluir(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+
+    for (GList *l = app->checks; l != NULL; l = l->next)
+    {
+        GtkWidget *check = l->data;
+
+        if (gtk_check_button_get_active(GTK_CHECK_BUTTON(check)))
+        {
+            const char *id = g_object_get_data(G_OBJECT(check), "id");
+
+            if (!id)
+            {
+                mostrar_erro(GTK_WINDOW(app->popup), "ID inválido");
+                return;
+            }
+
+            char caminho[300];
+            snprintf(caminho, sizeof(caminho), "%s/%s", app->bdAtual, id);
+
+            removerBD(caminho, GTK_WINDOW(app->popup));
+            return;
+        }
+    }
+
+    mostrar_erro(GTK_WINDOW(app->popup), "Nenhum item selecionado");
+}
+
+void desativar_check_exc(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+
+    for (GList *l = app->checks; l != NULL; l = l->next)
+        gtk_widget_set_visible(GTK_WIDGET(l->data), FALSE);
+}
+
+void ativar_check_exc(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+
+    for (GList *l = app->checks; l != NULL; l = l->next)
+        gtk_widget_set_visible(GTK_WIDGET(l->data), TRUE);
+}
+
+void popup_criarBD(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+
+    GtkWidget *popup = gtk_window_new();
+    app->popup = popup;
+
+    gtk_window_set_title(GTK_WINDOW(popup), "Criar BD");
+    gtk_window_set_default_size(GTK_WINDOW(popup), 300, 120);
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+
+    GtkWidget *entry = gtk_entry_new();
+    GtkWidget *btn_create = gtk_button_new_with_label("Criar");
+
+    g_object_set_data(G_OBJECT(btn_create), "entry", entry);
+    g_signal_connect(btn_create, "clicked", G_CALLBACK(criarBD), app);
+
+    gtk_box_append(GTK_BOX(box), entry);
+    gtk_box_append(GTK_BOX(box), btn_create);
+
+    gtk_window_set_child(GTK_WINDOW(popup), box);
+    gtk_window_present(GTK_WINDOW(popup));
+}
+
+static void reajustar(GtkWidget *Widget, GtkAllocation *allocation, gpointer data) {
+
+    GtkFlowBox *flow = GTK_FLOW_BOX(data);
+
+    int largura = allocation->width;
+
+    int colunas = largura / 150;
+
+    if (colunas < 1)
+        colunas = 1;
+
+    gtk_flow_box_set_max_children_per_line(flow, colunas);
+}
+
+static void interface(GtkApplication *app, gpointer user_data)
+{
+    AppData *data = g_malloc0(sizeof(AppData));
+
+    /* ===== JANELA PRINCIPAL ===== */
+    GtkWidget *win = gtk_application_window_new(app);
+    gtk_window_set_title(GTK_WINDOW(win), "Banco de Dados");
+    gtk_window_set_default_size(GTK_WINDOW(win), 1200, 900);
+
+    /* ===== STACK (PÁGINAS) ===== */
+    GtkWidget *stack = gtk_stack_new();
+
+    /* ===== PÁGINA PRINCIPAL ===== */
+    GtkWidget *pagina = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+
+    /* ===== NAVBAR ===== */
+    GtkWidget *nav = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+
+    GtkWidget *btn_container = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_widget_set_hexpand(btn_container, TRUE);
+    gtk_widget_set_halign(btn_container, GTK_ALIGN_END);
+
+    /* ===== BOTÕES ===== */
+    GtkWidget *btn_criar = gtk_button_new_with_label("Criar");
+    GtkWidget *btn_excluir = gtk_button_new_with_label("Excluir");
+
+    data->btn_criar = btn_criar;
+    data->btn_excluir = btn_excluir;
+
+    /* ===== CONTAINER DOS BANCOS ===== */
+    GtkWidget *container = gtk_flow_box_new();
+
+    data->container = container;
+
+    gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(container), GTK_SELECTION_NONE);
+    gtk_widget_set_hexpand(container, TRUE);
+    gtk_widget_set_vexpand(container, TRUE);
+
+    /* ===== RESIZE DINÂMICO ===== */
+    g_signal_connect(win, "notify::width", G_CALLBACK(reajustar), container);
+
+    /* ===== CONEXÕES DOS BOTÕES ===== */
+    g_signal_connect(btn_criar, "clicked", G_CALLBACK(popup_criarBD), data);
+    g_signal_connect(btn_excluir, "clicked", G_CALLBACK(ativar_check_exc), data);
+
+    /* ===== MONTAGEM NAV ===== */
+    gtk_box_append(GTK_BOX(btn_container), btn_criar);
+    gtk_box_append(GTK_BOX(btn_container), btn_excluir);
+
+    gtk_box_append(GTK_BOX(nav), btn_container);
+
+    /* ===== MONTAGEM PÁGINA ===== */
+    gtk_box_append(GTK_BOX(pagina), nav);
+    procurarBD(NULL,data);
+    gtk_box_append(GTK_BOX(pagina), container);
+
+    /* ===== STACK ===== */
+    gtk_stack_add_named(GTK_STACK(stack), pagina, "menu");
+
+    gtk_window_set_child(GTK_WINDOW(win), stack);
+
+    gtk_window_present(GTK_WINDOW(win));
+}
+
+int main(int argc, char **argv)
+{
+    GtkApplication *app;
+    int status;
+
+    init_base_dir();
+
+    app = gtk_application_new("com.exemplo.loading", G_APPLICATION_DEFAULT_FLAGS);
+    g_signal_connect(app, "activate", G_CALLBACK(interface), NULL);
+
+    status = g_application_run(G_APPLICATION(app), argc, argv);
+    g_object_unref(app);
+
+    return status;
+}
