@@ -6,6 +6,7 @@
 #include <gtk/gtk.h>
 #include <errno.h>
 #include <glib.h>
+#include <limits.h>
 
 
 void ativar_check_exc(GtkButton *btn, gpointer data);
@@ -13,8 +14,12 @@ void desativar_check_exc(GtkButton *btn, gpointer data);
 void tratar_excluir(GtkButton *btn, gpointer data);
 void apagar_pasta(const char *path);
 void mostrar_erro(GtkWindow *parent, const char *mensagem);
+void btn_criar_clicked(GtkButton *btn, gpointer data);
+void btn_excluir_clicked(GtkButton *btn, gpointer data);
+void popup_criarBD(GtkButton *btn, gpointer data);
 
 char BASE_DIR[300];
+int popup_criar_existe = 0;
 
 void init_base_dir()
 {
@@ -23,6 +28,8 @@ void init_base_dir()
     snprintf(BASE_DIR, sizeof(BASE_DIR), "%s/banco_do_Yuka", docs);
 
     g_mkdir_with_parents(BASE_DIR, 0755);
+    
+
 }
 
 typedef struct {
@@ -30,9 +37,13 @@ typedef struct {
     GtkWidget *btn_criar;
     GtkWidget *btn_excluir;
     GtkWidget *popup;
+    GtkWidget *primeiro_check;
+
+    gboolean modo_exclusao;
 
     GList *checks;
     GList *botoes;
+
 
     char bdAtual[100];
 } AppData;
@@ -535,24 +546,25 @@ void entrarBD(char *nome_bd)
 */
 void procurarBD(GtkButton *btn, gpointer data)
 {
+
     AppData *app = data;
 
     DIR *d;
     struct dirent *dir;
+    int encontrou = 0;
 
+    // libera listas antigas (sem tocar widgets já removidos)
     g_list_free(app->checks);
     app->checks = NULL;
 
     g_list_free(app->botoes);
     app->botoes = NULL;
 
-    GtkWidget *child = gtk_widget_get_first_child(app->container);
-
-    while (child)
+    // limpa flowbox corretamente
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child(app->container)) != NULL)
     {
-        GtkWidget *next = gtk_widget_get_next_sibling(child);
         gtk_flow_box_remove(GTK_FLOW_BOX(app->container), child);
-        child = next;
     }
 
     d = opendir(BASE_DIR);
@@ -571,35 +583,37 @@ void procurarBD(GtkButton *btn, gpointer data)
     {
         if (strcmp(dir->d_name, ".") != 0 &&
             strcmp(dir->d_name, "..") != 0 &&
-            strstr(dir->d_name, "_bd") != NULL)
+            g_str_has_suffix(dir->d_name, "_bd"))
         {
-            gtk_flow_box_remove(GTK_FLOW_BOX(app->container), label);
-            GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
-            gtk_widget_set_size_request(box, 10, 10);
-            gtk_widget_set_hexpand(box, FALSE);
-            gtk_widget_set_vexpand(box, FALSE); 
+            if (!encontrou)
+            {
+                gtk_flow_box_remove(GTK_FLOW_BOX(app->container), label);
+                encontrou = 1;
+            }
 
-            GtkWidget *check = gtk_check_button_new();
-            gtk_widget_set_visible(check, TRUE);
-            gtk_widget_set_size_request(check, 10, 10);
-            gtk_widget_set_halign(check, GTK_ALIGN_END);
-            gtk_widget_set_valign(check, GTK_ALIGN_START);
+            GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+
+            GtkWidget *check;
+            if (app->checks == NULL)
+            {
+                check = gtk_check_button_new();
+
+                app->primeiro_check = check;
+                
+            }
+            else
+            {
+                gtk_check_button_set_group(GTK_CHECK_BUTTON(check), GTK_CHECK_BUTTON(app->primeiro_check));
+            }
+            gtk_widget_set_visible(check,FALSE);
 
             char *nome = g_strdup(dir->d_name);
             g_object_set_data_full(G_OBJECT(check), "id", nome, g_free);
 
             GtkWidget *btn_bd = gtk_button_new_with_label(dir->d_name);
-            gtk_widget_set_size_request(btn_bd, 150, 150);
-            gtk_widget_set_hexpand(btn_bd, FALSE);
-            gtk_widget_set_vexpand(btn_bd, FALSE);
-            gtk_widget_set_halign(btn_bd, GTK_ALIGN_CENTER);
-            gtk_widget_set_valign(btn_bd, GTK_ALIGN_CENTER);
 
             app->checks = g_list_append(app->checks, check);
             app->botoes = g_list_append(app->botoes, btn_bd);
-            
-            gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(app->container), GTK_SELECTION_NONE);
-            gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(app->container), FALSE);  
 
             gtk_box_append(GTK_BOX(box), btn_bd);
             gtk_box_append(GTK_BOX(box), check);
@@ -618,16 +632,17 @@ void criarBD(GtkButton *btn, gpointer data)
 
     if (!entry)
     {
-        mostrar_erro(GTK_WINDOW(app->popup), "nome não renderizado, tente de novo!");
+        if (app->popup)
+            mostrar_erro(GTK_WINDOW(app->popup), "Entry não encontrada");
         return;
     }
-
 
     const char *texto = gtk_editable_get_text(GTK_EDITABLE(entry));
 
     if (!texto || strlen(texto) == 0)
     {
-        mostrar_erro(GTK_WINDOW(app->popup), "Nome do banco não pode ser vazio!");
+        if (app->popup)
+            mostrar_erro(GTK_WINDOW(app->popup), "Nome não pode ser vazio");
         return;
     }
 
@@ -639,33 +654,38 @@ void criarBD(GtkButton *btn, gpointer data)
         if (nome[i] == ' ')
             nome[i] = '_';
 
-    char pasta[3000];
-    snprintf(pasta, sizeof(pasta), "%s\\%s_bd", BASE_DIR, nome);
+    char pasta[PATH_MAX];
+    snprintf(pasta, sizeof(pasta), "%s/%s_bd", BASE_DIR, nome);
 
     struct stat st;
 
     if (stat(pasta, &st) == 0)
     {
-        mostrar_erro(GTK_WINDOW(app->popup), "Esse banco já existe!");
+        if (app->popup)
+            mostrar_erro(GTK_WINDOW(app->popup), "Banco já existe");
         return;
     }
 
-    if (mkdir(pasta) != 0){
-        mostrar_erro(GTK_WINDOW(app->popup), "Erro ao criar banco de dados!");   
+    if (g_mkdir_with_parents(pasta, 0755) != 0)
+    {
+        if (app->popup)
+            mostrar_erro(GTK_WINDOW(app->popup), "Erro ao criar banco");
         return;
     }
 
     gtk_window_destroy(GTK_WINDOW(app->popup));
     app->popup = NULL;
 
-    procurarBD(NULL,data);
+    procurarBD(NULL, app);
+
+    popup_criar_existe = 0;
 }
 
 void removerBD(const char *path, GtkWindow *parent)
 {
     DIR *dir = opendir(path);
     struct dirent *entry;
-    char caminho[1024];
+    char caminho[PATH_MAX];
     struct stat st;
 
     if (!dir)
@@ -687,15 +707,13 @@ void removerBD(const char *path, GtkWindow *parent)
         }
         else
         {
-            if (remove(caminho) != 0)
-                mostrar_erro(parent, "Erro ao remover arquivo interno");
+            remove(caminho);
         }
     }
 
     closedir(dir);
 
-    if (rmdir(path) != 0)
-        mostrar_erro(parent, "Erro ao remover pasta principal");
+    rmdir(path);
 }
 
 //gtk
@@ -705,11 +723,15 @@ void mostrar_erro(GtkWindow *parent, const char *mensagem)
     GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", mensagem);
 
     gtk_alert_dialog_show(dialog, parent);
+
+    g_object_unref(dialog);
 }
 
 void tratar_excluir(GtkButton *btn, gpointer data)
 {
     AppData *app = data;
+
+    desativar_check_exc(btn,data);
 
     for (GList *l = app->checks; l != NULL; l = l->next)
     {
@@ -725,13 +747,16 @@ void tratar_excluir(GtkButton *btn, gpointer data)
                 return;
             }
 
-            char caminho[300];
-            snprintf(caminho, sizeof(caminho), "%s/%s", app->bdAtual, id);
+            char caminho[PATH_MAX];
+            snprintf(caminho, sizeof(caminho), "%s/%s", BASE_DIR, id);
 
             removerBD(caminho, GTK_WINDOW(app->popup));
+            procurarBD(NULL, app);
             return;
         }
     }
+
+    
 
     mostrar_erro(GTK_WINDOW(app->popup), "Nenhum item selecionado");
 }
@@ -740,22 +765,75 @@ void desativar_check_exc(GtkButton *btn, gpointer data)
 {
     AppData *app = data;
 
+    gtk_button_set_label(GTK_BUTTON(app->btn_excluir), "Excluir");
+    gtk_button_set_label(GTK_BUTTON(app->btn_criar), "Criar");
+    
+    app->modo_exclusao = FALSE;
+
     for (GList *l = app->checks; l != NULL; l = l->next)
+    {
         gtk_widget_set_visible(GTK_WIDGET(l->data), FALSE);
+    }
+
+
 }
 
 void ativar_check_exc(GtkButton *btn, gpointer data)
 {
     AppData *app = data;
 
+    gtk_button_set_label(GTK_BUTTON(app->btn_excluir), "Cancelar");
+    gtk_button_set_label(GTK_BUTTON(app->btn_criar), "Confirmar");
+
+    app->modo_exclusao = TRUE;
+
     for (GList *l = app->checks; l != NULL; l = l->next)
+    {
         gtk_widget_set_visible(GTK_WIDGET(l->data), TRUE);
+    }
+
 }
+
+
+void btn_excluir_clicked(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+
+    if (!app->checks)    return;
+
+    if (!app->modo_exclusao)
+    {
+       ativar_check_exc(btn, data);
+    }
+    else
+    {
+        desativar_check_exc(btn, data);
+    }
+}
+
+void btn_criar_clicked(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+
+
+    if (app->modo_exclusao)
+    {
+        tratar_excluir(btn, data);
+        return;
+    }
+
+    popup_criarBD(btn, data);
+}
+
 
 void popup_criarBD(GtkButton *btn, gpointer data)
 {
     AppData *app = data;
+    
+    if(popup_criar_existe)return;
 
+    popup_criar_existe = 1;
+    
     GtkWidget *popup = gtk_window_new();
     app->popup = popup;
 
@@ -777,13 +855,11 @@ void popup_criarBD(GtkButton *btn, gpointer data)
     gtk_window_present(GTK_WINDOW(popup));
 }
 
-static void reajustar(GtkWidget *Widget, GtkAllocation *allocation, gpointer data) {
-
+static void reajustar(GtkWidget *widget, int width, int height, gpointer data)
+{
     GtkFlowBox *flow = GTK_FLOW_BOX(data);
 
-    int largura = allocation->width;
-
-    int colunas = largura / 150;
+    int colunas = width / 170;
 
     if (colunas < 1)
         colunas = 1;
@@ -797,6 +873,7 @@ static void interface(GtkApplication *app, gpointer user_data)
 
     /* ===== JANELA PRINCIPAL ===== */
     GtkWidget *win = gtk_application_window_new(app);
+    g_object_set_data_full(G_OBJECT(win), "app-data", data, g_free);
     gtk_window_set_title(GTK_WINDOW(win), "Banco de Dados");
     gtk_window_set_default_size(GTK_WINDOW(win), 1200, 900);
 
@@ -830,11 +907,11 @@ static void interface(GtkApplication *app, gpointer user_data)
     gtk_widget_set_vexpand(container, TRUE);
 
     /* ===== RESIZE DINÂMICO ===== */
-    g_signal_connect(win, "notify::width", G_CALLBACK(reajustar), container);
+    g_signal_connect(win, "size-allocate",G_CALLBACK(reajustar),container);
 
     /* ===== CONEXÕES DOS BOTÕES ===== */
-    g_signal_connect(btn_criar, "clicked", G_CALLBACK(popup_criarBD), data);
-    g_signal_connect(btn_excluir, "clicked", G_CALLBACK(ativar_check_exc), data);
+    g_signal_connect(btn_criar, "clicked", G_CALLBACK(btn_criar_clicked), data);
+    g_signal_connect(btn_excluir, "clicked", G_CALLBACK(btn_excluir_clicked), data);
 
     /* ===== MONTAGEM NAV ===== */
     gtk_box_append(GTK_BOX(btn_container), btn_criar);
