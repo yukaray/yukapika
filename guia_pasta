@@ -1,0 +1,18 @@
+para ver a pasta o windows
+
+Pressione as teclas Windows + R no seu teclado (vai abrir a janelinha "Executar").
+
+Digite %localappdata% e pressione Enter.
+
+Uma janela do Explorador de Arquivos vai se abrir direto na pasta correta. Daí é só procurar pela pasta .banco_do_Yuka.
+
+para ver no linux
+
+Abra a sua pasta pessoal (Home).
+
+Pressione o atalho Ctrl + H no teclado. Esse é o comando universal no Linux para "Mostrar arquivos ocultos".
+
+Você verá que várias pastas que começam com ponto (.) vão aparecer.
+
+Navegue pelo seguinte caminho:
+.local ➡️ share ➡️ .banco_do_Yuka
