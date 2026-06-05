@@ -1,0 +1,1260 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <gtk/gtk.h>
+#include <errno.h>
+#include <glib.h>
+#include <limits.h>
+
+typedef struct {
+    GtkWidget *win;               
+    GtkWidget *container_bd;         
+    GtkWidget *container_salas;   
+    GtkWidget *btn_criar;         
+    GtkWidget *btn_excluir;       
+    GtkWidget *btn_criar_sala;    
+    GtkWidget *btn_excluir_sala;  
+    GtkWidget *tabela;       
+    GtkWidget *btn_criar_dado;       
+    GtkWidget *btn_excluir_dado;       
+    GtkWidget *btn_procurar;       
+    GtkWidget *campo_busca;       
+    GtkWidget *popup;             
+    GtkWidget *primeiro_check;       
+    GtkWidget *stack;       
+    
+    // Novas referências de Layout para gerenciar os estados vazios centralizados
+    GtkWidget *overlay_bd;         
+    GtkWidget *label_vazio_bd;     
+    GtkWidget *overlay_salas;      
+    GtkWidget *label_vazio_sala;
+    GtkWidget *overlay_tabela;      
+    GtkWidget *label_vazio_tabela;   
+    
+    gboolean modo_exclusao;       
+    gboolean modo_exclusao_sala;  
+    gboolean modo_exclusao_dado;  
+    gboolean popup_criar_existe;  
+
+    GList *checks;                
+    GList *botoes;                
+    GList *checks_salas;          
+    GList *botoes_salas;  
+    GList *checks_dados;
+    GList *botoes_dados;
+    
+    int num_linhas;
+
+    char bdAtual[PATH_MAX];       
+} AppData;
+
+typedef struct {
+    int IDs;
+    char nome[100];
+    char materia[50];
+} prof;
+
+// Protótipos das funções organizados corretamente
+void init_base_dir(void);
+static void criar_bloco_visual_bd(AppData *app, const char *titulo);
+static void criar_bloco_visual_sala(AppData *app, const char *titulo);
+static void criar_bloco_visual_dado(AppData *app, int id, const char *nome, const char *materia);
+void procurarBD(GtkButton *btn, gpointer data);
+void procurarSalas(AppData *app);
+void procurarDados(AppData *app);
+void criarBD(GtkButton *btn, gpointer data);
+void criarSala(GtkButton *btn, gpointer data);
+void salvarProfessor(GtkButton *btn, gpointer data);
+void popup_criarProfessor(GtkButton *btn, gpointer data);
+void popup_editarProfessor(GtkButton *btn, gpointer data);
+void salvarAlteracaoProfessor(GtkButton *btn, gpointer data);
+void removerArquivo(const char *path, GtkWindow *parent);
+void mostrar_erro(GtkWindow *parent, const char *mensagem);
+static void on_popup_destroy(GtkWidget *widget, gpointer data);
+
+// Funções de alternância dos Checkboxes
+void desativar_check_exc(GtkButton *btn, gpointer data);
+void activar_check_exc(GtkButton *btn, gpointer data);
+void desativar_check_exc_dado(GtkButton *btn, AppData *app);
+
+// Callbacks de Controle de Telas e Cliques
+void btn_bd_clicked(GtkButton *btn, gpointer data);
+void btn_sala_clicked(GtkButton *btn, gpointer data);
+void btn_voltar_clicked(GtkButton *btn, gpointer data);
+void btn_criar_clicked(GtkButton *btn, gpointer data);
+void btn_excluir_clicked(GtkButton *btn, gpointer data);
+void btn_criar_sala_clicked(GtkButton *btn, gpointer data);
+void btn_excluir_sala_clicked(GtkButton *btn, gpointer data);
+void btn_criar_dado_clicked(GtkButton *btn, gpointer data);
+void btn_excluir_dado_clicked(GtkButton *btn, gpointer data);
+void popup_criarBD(GtkButton *btn, gpointer data);
+void popup_criarSala(GtkButton *btn, gpointer data);
+void tratar_excluir(GtkButton *btn, gpointer data);
+void tratar_excluir_sala(GtkButton *btn, gpointer data);
+void tratar_excluir_dado(GtkButton *btn, gpointer data);
+
+// Novos Callbacks específicos do Mecanismo de Busca Dinâmica
+static void on_campo_busca_changed(GtkEditable *editable, gpointer data);
+static void on_btn_procurar_clicked(GtkButton *btn, gpointer data);
+
+char BASE_DIR[PATH_MAX];
+
+void init_base_dir(void) 
+{
+    const char *docs = g_get_user_special_dir(G_USER_DIRECTORY_DOCUMENTS);
+    if (!docs) {
+        docs = g_get_home_dir(); 
+    }
+    snprintf(BASE_DIR, sizeof(BASE_DIR), "%s/banco_do_Yuka", docs);
+    g_mkdir_with_parents(BASE_DIR, 0755);
+}
+
+int obter_proximo_id(const char *caminho) {
+    char caminho_seq[PATH_MAX];
+    g_strlcpy(caminho_seq, caminho, sizeof(caminho_seq));
+    char *dot = strrchr(caminho_seq, '.');
+    if (dot) {
+        strcpy(dot, ".seq");
+    } else {
+        strcat(caminho_seq, ".seq");
+    }
+
+    int prox_id = 1;
+    FILE *f = fopen(caminho_seq, "r");
+    if (f) {
+        if (fscanf(f, "%d", &prox_id) != 1) {
+            prox_id = 1;
+        }
+        fclose(f);
+    } else {
+        FILE *f_txt = fopen(caminho, "r");
+        if (f_txt) {
+            char linha[256];
+            int max_id = 0;
+            while (fgets(linha, sizeof(linha), f_txt)) {
+                int id;
+                if (sscanf(linha, "id: %d;", &id) == 1) {
+                    if (id > max_id) max_id = id;
+                }
+            }
+            fclose(f_txt);
+            prox_id = max_id + 1;
+        }
+    }
+
+    f = fopen(caminho_seq, "w");
+    if (f) {
+        fprintf(f, "%d\n", prox_id + 1);
+        fclose(f);
+    }
+
+    return prox_id;
+}
+
+// ============================================================================
+// LÓGICA DE RENDERIZAÇÃO DE BLOCOS VISUAIS
+// ============================================================================
+
+static void criar_bloco_visual_bd(AppData *app, const char *titulo)
+{
+    GtkWidget *overlay = gtk_overlay_new();
+    gtk_widget_set_size_request(overlay, 150, 150);
+    gtk_widget_set_halign(overlay, GTK_ALIGN_START);
+    gtk_widget_set_valign(overlay, GTK_ALIGN_START);
+    
+    char exibicao[120];
+    g_strlcpy(exibicao, titulo, sizeof(exibicao));
+    if (g_str_has_suffix(exibicao, "_bd")) {
+        exibicao[strlen(exibicao) - 3] = '\0';
+    }
+
+    GtkWidget *btn_bd = gtk_button_new();
+    gtk_widget_set_sensitive(btn_bd, !app->modo_exclusao);
+    gtk_widget_set_hexpand(btn_bd, TRUE);
+    gtk_widget_set_vexpand(btn_bd, TRUE);
+    
+    gtk_widget_add_css_class(btn_bd, "flat");
+
+    GtkWidget *box_interno = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6); 
+    gtk_widget_set_halign(box_interno, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(box_interno, GTK_ALIGN_CENTER);
+
+    // USANDO ÍCONE NATIVO SIMBÓLICO (Sem arquivos externos e totalmente limpo)
+    GtkWidget *icone_bd = gtk_image_new_from_icon_name("drive-harddisk");
+    gtk_image_set_pixel_size(GTK_IMAGE(icone_bd), 72); 
+
+    GtkWidget *lbl_texto = gtk_label_new(exibicao);
+
+    gtk_box_append(GTK_BOX(box_interno), icone_bd);
+    gtk_box_append(GTK_BOX(box_interno), lbl_texto);
+    
+    gtk_button_set_child(GTK_BUTTON(btn_bd), box_interno);
+
+    // Mantém o ID da pasta vinculado para que a navegação de salas funcione perfeitamente
+    g_object_set_data_full(G_OBJECT(btn_bd), "id_pasta", g_strdup(titulo), g_free);
+
+    g_signal_connect(btn_bd, "clicked", G_CALLBACK(btn_bd_clicked), app);
+    gtk_overlay_set_child(GTK_OVERLAY(overlay), btn_bd);
+
+    GtkWidget *check = gtk_check_button_new();
+    gtk_widget_set_visible(check, app->modo_exclusao);
+    gtk_widget_set_can_target(check, app->modo_exclusao);
+    gtk_widget_set_hexpand(check, FALSE);
+    gtk_widget_set_vexpand(check, FALSE);
+    gtk_widget_set_halign(check, GTK_ALIGN_END);
+    gtk_widget_set_valign(check, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(check, 8);
+    gtk_widget_set_margin_end(check, 8);
+
+    char *nome = g_strdup(titulo);
+    g_object_set_data_full(G_OBJECT(check), "id", nome, g_free);
+
+    app->checks = g_list_append(app->checks, check);
+    app->botoes = g_list_append(app->botoes, btn_bd);
+
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), check);
+    gtk_flow_box_insert(GTK_FLOW_BOX(app->container_bd), overlay, -1);
+}
+
+static void criar_bloco_visual_sala(AppData *app, const char *titulo)
+{
+    char exibicao[120];
+    strncpy(exibicao, titulo, sizeof(exibicao));
+    exibicao[sizeof(exibicao) - 1] = '\0';
+    char *dot = strrchr(exibicao, '.');
+    if (dot) *dot = '\0';
+
+    GtkWidget *overlay = gtk_overlay_new();
+    gtk_widget_set_size_request(overlay, 150, 150); 
+    gtk_widget_set_halign(overlay, GTK_ALIGN_START);
+    gtk_widget_set_valign(overlay, GTK_ALIGN_START);
+    
+    GtkWidget *btn_sala = gtk_button_new();
+    gtk_widget_set_sensitive(btn_sala, !app->modo_exclusao_sala);
+    gtk_widget_set_hexpand(btn_sala, TRUE);
+    gtk_widget_set_vexpand(btn_sala, TRUE);
+    gtk_widget_add_css_class(btn_sala, "flat");
+    
+    GtkWidget *box_interno = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_halign(box_interno, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(box_interno, GTK_ALIGN_CENTER);
+
+    GtkWidget *icone_pasta = gtk_image_new_from_icon_name("folder");
+    gtk_image_set_pixel_size(GTK_IMAGE(icone_pasta), 56);
+
+    GtkWidget *lbl_texto = gtk_label_new(exibicao);
+
+    gtk_box_append(GTK_BOX(box_interno), icone_pasta);
+    gtk_box_append(GTK_BOX(box_interno), lbl_texto);
+    gtk_button_set_child(GTK_BUTTON(btn_sala), box_interno);
+
+    g_object_set_data_full(G_OBJECT(btn_sala), "id_arquivo", g_strdup(titulo), g_free);
+
+    g_signal_connect(btn_sala, "clicked", G_CALLBACK(btn_sala_clicked), app);
+    gtk_overlay_set_child(GTK_OVERLAY(overlay), btn_sala);
+
+    GtkWidget *check = gtk_check_button_new();
+    gtk_widget_set_visible(check, app->modo_exclusao_sala);
+    gtk_widget_set_can_target(check, app->modo_exclusao_sala);
+    gtk_widget_set_hexpand(check, FALSE);
+    gtk_widget_set_vexpand(check, FALSE);
+    gtk_widget_set_halign(check, GTK_ALIGN_END);
+    gtk_widget_set_valign(check, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(check, 8);
+    gtk_widget_set_margin_end(check, 8);
+
+    char *nome_completo = g_strdup(titulo);
+    g_object_set_data_full(G_OBJECT(check), "id", nome_completo, g_free);
+
+    app->checks_salas = g_list_append(app->checks_salas, check);
+    app->botoes_salas = g_list_append(app->botoes_salas, btn_sala);
+
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), check);
+    gtk_flow_box_insert(GTK_FLOW_BOX(app->container_salas), overlay, -1);
+}
+
+static void criar_bloco_visual_dado(AppData *app, int id, const char *nome, const char *materia)
+{
+    char str_id_exibir[32];
+    snprintf(str_id_exibir, sizeof(str_id_exibir), "ID: %d", id);
+    GtkWidget *lbl_id = gtk_label_new(str_id_exibir);
+    gtk_widget_set_halign(lbl_id, GTK_ALIGN_START);
+
+    GtkWidget *btn_prof = gtk_button_new_with_label(nome);
+    gtk_widget_set_halign(btn_prof, GTK_ALIGN_START);
+    gtk_widget_set_hexpand(btn_prof, TRUE);
+    gtk_widget_add_css_class(btn_prof, "flat");
+
+    GtkWidget *check = gtk_check_button_new();
+    gtk_widget_set_visible(check, app->modo_exclusao_dado);
+    gtk_widget_set_can_target(check, app->modo_exclusao_dado);
+    gtk_widget_set_halign(check, GTK_ALIGN_END);
+
+    g_object_set_data(G_OBJECT(btn_prof), "prof_id", GINT_TO_POINTER(id));
+    g_object_set_data_full(G_OBJECT(btn_prof), "prof_nome", g_strdup(nome), g_free);
+    g_object_set_data_full(G_OBJECT(btn_prof), "prof_materia", g_strdup(materia), g_free);
+    g_signal_connect(btn_prof, "clicked", G_CALLBACK(popup_editarProfessor), app);
+
+    g_object_set_data(G_OBJECT(check), "prof_id", GINT_TO_POINTER(id));
+
+    app->checks_dados = g_list_append(app->checks_dados, check);
+    app->botoes_dados = g_list_append(app->botoes_dados, btn_prof);
+
+    gtk_grid_attach(GTK_GRID(app->tabela), lbl_id, 0, app->num_linhas, 1, 1);
+    gtk_grid_attach(GTK_GRID(app->tabela), btn_prof, 1, app->num_linhas, 1, 1);
+    gtk_grid_attach(GTK_GRID(app->tabela), check, 2, app->num_linhas, 1, 1);
+
+    app->num_linhas++;
+}
+
+// ============================================================================
+// OPERAÇÕES DO SISTEMA DE ARQUIVOS
+// ============================================================================
+
+void procurarBD(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    g_list_free(app->checks);
+    g_list_free(app->botoes);
+    app->checks = NULL; app->botoes = NULL;
+
+    if (app->label_vazio_bd != NULL) {
+        gtk_overlay_remove_overlay(GTK_OVERLAY(app->overlay_bd), app->label_vazio_bd);
+        app->label_vazio_bd = NULL;
+    }
+
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child(app->container_bd)) != NULL) {
+        gtk_flow_box_remove(GTK_FLOW_BOX(app->container_bd), child);
+    }
+
+    DIR *d = opendir(BASE_DIR);
+    if (!d) return;
+
+    struct dirent *dir;
+    gboolean encontrou = FALSE;
+    while ((dir = readdir(d)) != NULL) {
+        if (strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0) continue;
+        if (!g_str_has_suffix(dir->d_name, "_bd")) continue;
+
+        encontrou = TRUE;
+        criar_bloco_visual_bd(app, dir->d_name);
+    }
+    closedir(d);
+
+    if (!encontrou) {
+        app->label_vazio_bd = gtk_label_new("Nenhum banco encontrado.");
+        gtk_widget_set_halign(app->label_vazio_bd, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign(app->label_vazio_bd, GTK_ALIGN_CENTER);
+        gtk_overlay_add_overlay(GTK_OVERLAY(app->overlay_bd), app->label_vazio_bd);
+    }
+}
+
+void procurarSalas(AppData *app)
+{
+    g_list_free(app->checks_salas);
+    g_list_free(app->botoes_salas);
+    app->checks_salas = NULL; app->botoes_salas = NULL;
+
+    if (app->label_vazio_sala != NULL) {
+        gtk_overlay_remove_overlay(GTK_OVERLAY(app->overlay_salas), app->label_vazio_sala);
+        app->label_vazio_sala = NULL;
+    }
+
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child(app->container_salas)) != NULL) {
+        gtk_flow_box_remove(GTK_FLOW_BOX(app->container_salas), child);
+    }
+
+    DIR *d = opendir(app->bdAtual);
+    if (!d) return;
+
+    struct dirent *dir;
+    gboolean encontrou = FALSE;
+    while ((dir = readdir(d)) != NULL) {
+        if (strcmp(dir->d_name, ".") == 0 || strcmp(dir->d_name, "..") == 0) continue;
+        if (!g_str_has_suffix(dir->d_name, ".txt")) continue;
+        
+        encontrou = TRUE;
+        criar_bloco_visual_sala(app, dir->d_name);
+    }
+    closedir(d);
+
+    if (!encontrou) {
+        app->label_vazio_sala = gtk_label_new("Nenhum curso cadastrado.");
+        gtk_widget_set_halign(app->label_vazio_sala, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign(app->label_vazio_sala, GTK_ALIGN_CENTER);
+        gtk_overlay_add_overlay(GTK_OVERLAY(app->overlay_salas), app->label_vazio_sala);
+    }
+}
+
+void procurarDados(AppData *app)
+{
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child(app->tabela)) != NULL) {
+        gtk_grid_remove(GTK_GRID(app->tabela), child);
+    }
+    app->num_linhas = 0;
+
+    g_list_free(app->checks_dados);
+    g_list_free(app->botoes_dados);
+    app->checks_dados = NULL; app->botoes_dados = NULL;
+
+    if (app->label_vazio_tabela != NULL) {
+        gtk_overlay_remove_overlay(GTK_OVERLAY(app->overlay_tabela), app->label_vazio_tabela);
+        app->label_vazio_tabela = NULL;
+    }
+
+    FILE *f = fopen(app->bdAtual, "r");
+    if (!f) return;
+
+    const char *busca_texto = gtk_editable_get_text(GTK_EDITABLE(app->campo_busca));
+    gchar *busca_lower = g_utf8_strdown(busca_texto, -1);
+
+    char linha_txt[256];
+    gboolean encontrou_dados = FALSE;
+    gboolean algum_correspondeu = FALSE;
+
+    while (fgets(linha_txt, sizeof(linha_txt), f)) {
+        linha_txt[strcspn(linha_txt, "\n")] = '\0';
+        if (strlen(linha_txt) == 0) continue;
+
+        prof p;
+        if (sscanf(linha_txt, "id: %d; nome: %[^;]; matéria: %[^;];", &p.IDs, p.nome, p.materia) >= 2) {
+            encontrou_dados = TRUE;
+
+            char *nome_limpo = p.nome;
+            while(*nome_limpo == ' ') nome_limpo++;
+            char *materia_limpa = p.materia;
+            while(*materia_limpa == ' ') materia_limpa++;
+
+            char str_id[24];
+            snprintf(str_id, sizeof(str_id), "%d", p.IDs);
+            gchar *nome_lower = g_utf8_strdown(nome_limpo, -1);
+
+            gboolean termo_valido = FALSE;
+
+            if (strlen(busca_lower) == 0) {
+                termo_valido = TRUE;
+            } else if (g_strrstr(nome_lower, busca_lower) != NULL || g_strrstr(str_id, busca_lower) != NULL) {
+                termo_valido = TRUE;
+            }
+
+            g_free(nome_lower);
+
+            if (termo_valido) {
+                algum_correspondeu = TRUE;
+                criar_bloco_visual_dado(app, p.IDs, nome_limpo, materia_limpa);
+            }
+        }
+    }
+    fclose(f);
+    g_free(busca_lower);
+
+    if (!encontrou_dados) {
+        app->label_vazio_tabela = gtk_label_new("Nenhum professor cadastrado nesta sala.");
+        gtk_widget_set_halign(app->label_vazio_tabela, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign(app->label_vazio_tabela, GTK_ALIGN_CENTER);
+        gtk_overlay_add_overlay(GTK_OVERLAY(app->overlay_tabela), app->label_vazio_tabela);
+    } else if (!algum_correspondeu) {
+        app->label_vazio_tabela = gtk_label_new("Nenhum registro corresponde aos critérios de busca.");
+        gtk_widget_set_halign(app->label_vazio_tabela, GTK_ALIGN_CENTER);
+        gtk_widget_set_valign(app->label_vazio_tabela, GTK_ALIGN_CENTER);
+        gtk_overlay_add_overlay(GTK_OVERLAY(app->overlay_tabela), app->label_vazio_tabela);
+    }
+}
+
+static void on_campo_busca_changed(GtkEditable *editable, gpointer data) {
+    AppData *app = data;
+    procurarDados(app);
+}
+
+static void on_btn_procurar_clicked(GtkButton *btn, gpointer data) {
+    AppData *app = data;
+    gboolean visivel = gtk_widget_get_visible(app->campo_busca);
+
+    if (visivel) {
+        gtk_widget_set_visible(app->campo_busca, FALSE);
+        gtk_entry_set_placeholder_text(GTK_ENTRY(app->campo_busca), "");
+        gtk_editable_set_text(GTK_EDITABLE(app->campo_busca), ""); 
+    } else {
+        gtk_widget_set_visible(app->campo_busca, TRUE);
+        gtk_entry_set_placeholder_text(GTK_ENTRY(app->campo_busca), "Digite o que procura...");
+        gtk_widget_grab_focus(app->campo_busca);
+    }
+}
+
+void criarBD(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    GtkWidget *entry = g_object_get_data(G_OBJECT(btn), "entry");
+    if (!entry) return;
+
+    const char *texto = gtk_editable_get_text(GTK_EDITABLE(entry));
+    if (!texto || strlen(texto) == 0) return;
+
+    char nome[100];
+    strncpy(nome, texto, sizeof(nome));
+    nome[sizeof(nome)-1] = '\0';
+    for (int i = 0; nome[i]; i++) if (nome[i] == ' ') nome[i] = '_';
+
+    char pasta[PATH_MAX];
+    snprintf(pasta, sizeof(pasta), "%s/%s_bd", BASE_DIR, nome);
+
+    if (g_mkdir_with_parents(pasta, 0755) == 0) {
+        gtk_window_destroy(GTK_WINDOW(app->popup));
+        procurarBD(NULL, app);
+    }
+}
+
+void criarSala(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    GtkWidget *entry = g_object_get_data(G_OBJECT(btn), "entry");
+    if (!entry) return;
+
+    const char *texto = gtk_editable_get_text(GTK_EDITABLE(entry));
+    if (!texto || strlen(texto) == 0) return;
+
+    char caminho_arquivo[PATH_MAX];
+    snprintf(caminho_arquivo, sizeof(caminho_arquivo), "%s/%s.txt", app->bdAtual, texto);
+
+    FILE *f = fopen(caminho_arquivo, "a+");
+    if (f) {
+        fclose(f);
+        gtk_window_destroy(GTK_WINDOW(app->popup));
+        procurarSalas(app);
+    }
+}
+
+void salvarProfessor(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+
+    GtkWidget *entry_nome = g_object_get_data(G_OBJECT(btn), "campo_nome");
+    GtkWidget *entry_materia = g_object_get_data(G_OBJECT(btn), "campo_materia");
+
+    if (!entry_nome || !entry_materia) return;
+
+    const char *txt_nome = gtk_editable_get_text(GTK_EDITABLE(entry_nome));
+    const char *txt_materia = gtk_editable_get_text(GTK_EDITABLE(entry_materia));
+
+    if (strlen(txt_nome) == 0 || strlen(txt_materia) == 0) return; 
+
+    int proximo_id = obter_proximo_id(app->bdAtual);
+
+    FILE *f = fopen(app->bdAtual, "a+");
+    if (f) {
+        fprintf(f, "id: %d; nome: %s; matéria: %s;\n", proximo_id, txt_nome, txt_materia);
+        fclose(f);
+
+        gtk_window_destroy(GTK_WINDOW(app->popup));
+        procurarDados(app); 
+    }
+}
+
+void salvarAlteracaoProfessor(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    GtkWidget *entry_nome = g_object_get_data(G_OBJECT(btn), "campo_nome");
+    GtkWidget *entry_materia = g_object_get_data(G_OBJECT(btn), "campo_materia");
+    int target_id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "prof_id"));
+
+    if (!entry_nome || !entry_materia) return;
+
+    const char *new_nome = gtk_editable_get_text(GTK_EDITABLE(entry_nome));
+    const char *new_materia = gtk_editable_get_text(GTK_EDITABLE(entry_materia));
+
+    if (strlen(new_nome) == 0 || strlen(new_materia) == 0) return;
+
+    char caminho_temp[PATH_MAX];
+    snprintf(caminho_temp, sizeof(caminho_temp), "%s.tmp", app->bdAtual);
+    
+    FILE *fin = fopen(app->bdAtual, "r");
+    FILE *fout = fopen(caminho_temp, "w");
+
+    if (fin && fout) {
+        char linha[256];
+        while (fgets(linha, sizeof(linha), fin)) {
+            int id;
+            if (sscanf(linha, "id: %d;", &id) == 1 && id == target_id) {
+                fprintf(fout, "id: %d; nome: %s; matéria: %s;\n", target_id, new_nome, new_materia);
+            } else {
+                fputs(linha, fout);
+            }
+        }
+    }
+    if (fin) fclose(fin);
+    if (fout) fclose(fout);
+
+    remove(app->bdAtual);
+    rename(caminho_temp, app->bdAtual);
+
+    gtk_window_destroy(GTK_WINDOW(app->popup));
+    procurarDados(app);
+}
+
+void removerArquivo(const char *path, GtkWindow *parent)
+{
+    struct stat st;
+    if (stat(path, &st) != 0) return;
+
+    if (S_ISDIR(st.st_mode)) {
+        DIR *dir = opendir(path);
+        if (!dir) return;
+        struct dirent *entry;
+        char sub_path[PATH_MAX];
+        while ((entry = readdir(dir)) != NULL) {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+            snprintf(sub_path, sizeof(sub_path), "%s/%s", path, entry->d_name);
+            removerArquivo(sub_path, parent);
+        }
+        closedir(dir);
+        rmdir(path);
+    } else {
+        remove(path);
+    }
+}
+
+// ============================================================================
+// RESTAURADO: DEFINIÇÃO DAS FUNÇÕES DE EXCLUSÃO E CONTROLE (ERROS DO LINKER)
+// ============================================================================
+
+void desativar_check_exc(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    app->modo_exclusao = FALSE;
+    gtk_button_set_label(GTK_BUTTON(app->btn_excluir), "Excluir");
+    gtk_button_set_label(GTK_BUTTON(app->btn_criar), "Criar");
+    for (GList *l = app->checks; l; l = l->next) {
+        gtk_widget_set_visible(GTK_WIDGET(l->data), FALSE);
+        gtk_widget_set_can_target(GTK_WIDGET(l->data), FALSE); 
+    }
+    for (GList *l = app->botoes; l; l = l->next) gtk_widget_set_sensitive(GTK_WIDGET(l->data), TRUE);
+}
+
+void activar_check_exc(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    app->modo_exclusao = TRUE;
+    gtk_button_set_label(GTK_BUTTON(app->btn_excluir), "Cancelar");
+    gtk_button_set_label(GTK_BUTTON(app->btn_criar), "Confirmar");
+    for (GList *l = app->checks; l; l = l->next) {
+        gtk_widget_set_visible(GTK_WIDGET(l->data), TRUE);
+        gtk_widget_set_can_target(GTK_WIDGET(l->data), TRUE); 
+    }
+    for (GList *l = app->botoes; l; l = l->next) gtk_widget_set_sensitive(GTK_WIDGET(l->data), FALSE);
+}
+
+void desativar_check_exc_dado(GtkButton *btn, AppData *app) {
+    app->modo_exclusao_dado = FALSE;
+    gtk_button_set_label(GTK_BUTTON(app->btn_excluir_dado), "Excluir");
+    gtk_button_set_label(GTK_BUTTON(app->btn_criar_dado), "Criar");
+    for (GList *l = app->checks_dados; l; l = l->next) {
+        gtk_widget_set_visible(GTK_WIDGET(l->data), FALSE);
+        gtk_widget_set_can_target(GTK_WIDGET(l->data), FALSE);
+    }
+    for (GList *l = app->botoes_dados; l; l = l->next) gtk_widget_set_sensitive(GTK_WIDGET(l->data), TRUE);
+}
+
+void tratar_excluir(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    for (GList *l = app->checks; l != NULL; l = l->next) {
+        GtkWidget *check = l->data;
+        if (gtk_check_button_get_active(GTK_CHECK_BUTTON(check))) {
+            const char *id = g_object_get_data(G_OBJECT(check), "id");
+            if (id) {
+                char caminho[PATH_MAX];
+                snprintf(caminho, sizeof(caminho), "%s/%s", BASE_DIR, id);
+                removerArquivo(caminho, GTK_WINDOW(app->win));
+            }
+        }
+    }
+    desativar_check_exc(btn, data);
+    procurarBD(NULL, app);
+}
+
+void tratar_excluir_sala(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    for (GList *l = app->checks_salas; l != NULL; l = l->next) {
+        GtkWidget *check = l->data;
+        if (gtk_check_button_get_active(GTK_CHECK_BUTTON(check))) {
+            const char *id = g_object_get_data(G_OBJECT(check), "id");
+            if (id) {
+                char caminho[PATH_MAX];
+                snprintf(caminho, sizeof(caminho), "%s/%s", app->bdAtual, id);
+                removerArquivo(caminho, GTK_WINDOW(app->win));
+
+                char *dot = strrchr(caminho, '.');
+                if (dot) {
+                    strcpy(dot, ".seq");
+                    remove(caminho);
+                }
+            }
+        }
+    }
+    btn_excluir_sala_clicked(btn, data); 
+    procurarSalas(app);
+}
+
+void tratar_excluir_dado(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    GList *ids_deletar = NULL;
+
+    for (GList *l = app->checks_dados; l != NULL; l = l->next) {
+        GtkWidget *check = l->data;
+        if (gtk_check_button_get_active(GTK_CHECK_BUTTON(check))) {
+            gpointer id_ptr = g_object_get_data(G_OBJECT(check), "prof_id");
+            ids_deletar = g_list_append(ids_deletar, id_ptr);
+        }
+    }
+
+    if (ids_deletar != NULL) {
+        char caminho_temp[PATH_MAX];
+        snprintf(caminho_temp, sizeof(caminho_temp), "%s.tmp", app->bdAtual);
+        
+        FILE *fin = fopen(app->bdAtual, "r");
+        FILE *fout = fopen(caminho_temp, "w");
+
+        if (fin && fout) {
+            char linha[256];
+            while (fgets(linha, sizeof(linha), fin)) {
+                int id;
+                if (sscanf(linha, "id: %d;", &id) == 1) {
+                    gboolean pular = FALSE;
+                    for (GList *d = ids_deletar; d != NULL; d = d->next) {
+                        if (GPOINTER_TO_INT(d->data) == id) {
+                            pular = TRUE;
+                            break;
+                        }
+                    }
+                    if (!pular) {
+                        fputs(linha, fout);
+                    }
+                }
+            }
+        }
+        if (fin) fclose(fin);
+        if (fout) fclose(fout);
+
+        remove(app->bdAtual);
+        rename(caminho_temp, app->bdAtual);
+        g_list_free(ids_deletar);
+    }
+
+    desativar_check_exc_dado(btn, app);
+    procurarDados(app);
+}
+
+static void on_popup_destroy(GtkWidget *widget, gpointer data) {
+    AppData *app = data; app->popup_criar_existe = FALSE; app->popup = NULL;
+}
+
+// ============================================================================
+// CALLBACKS DE FLUXO DA INTERFACE
+// ============================================================================
+
+void btn_bd_clicked(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    const char *id_pasta = g_object_get_data(G_OBJECT(btn), "id_pasta");
+    if (!id_pasta) return;
+
+    snprintf(app->bdAtual, sizeof(app->bdAtual), "%s/%s", BASE_DIR, id_pasta);
+    gtk_stack_set_visible_child_name(GTK_STACK(app->stack), "menu_salas");
+    procurarSalas(app);
+}
+
+void btn_sala_clicked(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    const char *id_arquivo = g_object_get_data(G_OBJECT(btn), "id_arquivo");
+    if (!id_arquivo) return;
+
+    int tamanho_atual = strlen(app->bdAtual);
+    snprintf(app->bdAtual + tamanho_atual, sizeof(app->bdAtual) - tamanho_atual, "/%s", id_arquivo);
+
+    gtk_stack_set_visible_child_name(GTK_STACK(app->stack), "tabela");
+    procurarDados(app);
+}
+
+void btn_voltar_clicked(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    const char *tela_atual = gtk_stack_get_visible_child_name(GTK_STACK(app->stack));
+
+    if (strcmp(tela_atual, "tabela") == 0) {
+        char *ultimo_slash = strrchr(app->bdAtual, '/');
+        if (ultimo_slash) {
+            *ultimo_slash = '\0';
+        }
+        if (app->modo_exclusao_dado) {
+            desativar_check_exc_dado(NULL, app);
+        }
+        gtk_widget_set_visible(app->campo_busca, FALSE);
+        gtk_entry_set_placeholder_text(GTK_ENTRY(app->campo_busca), "");
+        gtk_editable_set_text(GTK_EDITABLE(app->campo_busca), "");
+
+        gtk_stack_set_visible_child_name(GTK_STACK(app->stack), "menu_salas");
+        procurarSalas(app);
+    } 
+    else if (strcmp(tela_atual, "menu_salas") == 0) {
+        app->bdAtual[0] = '\0';
+        if (app->modo_exclusao_sala) {
+            app->modo_exclusao_sala = FALSE;
+        }
+        gtk_stack_set_visible_child_name(GTK_STACK(app->stack), "menu_bd");
+        procurarBD(NULL, app);
+    }
+}
+
+void btn_criar_clicked(GtkButton *btn, gpointer data) {
+    AppData *app = data;
+    if (app->modo_exclusao) tratar_excluir(btn, data);
+    else popup_criarBD(btn, data);
+}
+
+void btn_excluir_clicked(GtkButton *btn, gpointer data) {
+    AppData *app = data;
+    if (!app->checks) return;
+    if (!app->modo_exclusao) activar_check_exc(btn, data);
+    else desativar_check_exc(btn, data);
+}
+
+void btn_criar_sala_clicked(GtkButton *btn, gpointer data) {
+    AppData *app = data;
+    if (app->modo_exclusao_sala) tratar_excluir_sala(btn, data);
+    else popup_criarSala(btn, data);
+}
+
+void btn_excluir_sala_clicked(GtkButton *btn, gpointer data) {
+    AppData *app = data;
+    if (!app->checks_salas) return;
+    if (!app->modo_exclusao_sala) {
+        app->modo_exclusao_sala = TRUE;
+        gtk_button_set_label(GTK_BUTTON(app->btn_excluir_sala), "Cancelar");
+        gtk_button_set_label(GTK_BUTTON(app->btn_criar_sala), "Confirmar");
+        
+        for (GList *l = app->checks_salas; l; l = l->next) {
+            gtk_widget_set_visible(GTK_WIDGET(l->data), TRUE);
+            gtk_widget_set_can_target(GTK_WIDGET(l->data), TRUE); 
+        }
+        for (GList *l = app->botoes_salas; l; l = l->next) gtk_widget_set_sensitive(GTK_WIDGET(l->data), FALSE);
+    } else {
+        app->modo_exclusao_sala = FALSE;
+        gtk_button_set_label(GTK_BUTTON(app->btn_excluir_sala), "Excluir");
+        gtk_button_set_label(GTK_BUTTON(app->btn_criar_sala), "Criar");
+        
+        for (GList *l = app->checks_salas; l; l = l->next) {
+            gtk_widget_set_visible(GTK_WIDGET(l->data), FALSE);
+            gtk_widget_set_can_target(GTK_WIDGET(l->data), FALSE); 
+        }
+        for (GList *l = app->botoes_salas; l; l = l->next) gtk_widget_set_sensitive(GTK_WIDGET(l->data), TRUE);
+    }
+}
+
+void btn_criar_dado_clicked(GtkButton *btn, gpointer data) {
+    AppData *app = data;
+    if (app->modo_exclusao_dado) tratar_excluir_dado(btn, data);
+    else popup_criarProfessor(btn, data);
+}
+
+void btn_excluir_dado_clicked(GtkButton *btn, gpointer data) {
+    AppData *app = data;
+    if (!app->checks_dados) return;
+    if (!app->modo_exclusao_dado) {
+        app->modo_exclusao_dado = TRUE;
+        gtk_button_set_label(GTK_BUTTON(app->btn_excluir_dado), "Cancelar");
+        gtk_button_set_label(GTK_BUTTON(app->btn_criar_dado), "Confirmar");
+        for (GList *l = app->checks_dados; l; l = l->next) {
+            gtk_widget_set_visible(GTK_WIDGET(l->data), TRUE);
+            gtk_widget_set_can_target(GTK_WIDGET(l->data), TRUE);
+        }
+        for (GList *l = app->botoes_dados; l; l = l->next) gtk_widget_set_sensitive(GTK_WIDGET(l->data), FALSE);
+    } else {
+        desativar_check_exc_dado(btn, app);
+    }
+}
+
+// ============================================================================
+// GERENCIAMENTO DE POPUPS
+// ============================================================================
+
+void popup_criarBD(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    if (app->popup_criar_existe) return;
+    app->popup_criar_existe = TRUE;
+
+    GtkWidget *popup = gtk_window_new();
+    app->popup = popup;
+    gtk_window_set_title(GTK_WINDOW(popup), "Criar Banco de Dados");
+    gtk_window_set_default_size(GTK_WINDOW(popup), 320, 130);
+    gtk_window_set_transient_for(GTK_WINDOW(popup), GTK_WINDOW(app->win));
+    gtk_window_set_modal(GTK_WINDOW(popup), TRUE);
+    g_signal_connect(popup, "destroy", G_CALLBACK(on_popup_destroy), app);
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_top(box, 15);
+    gtk_widget_set_margin_start(box, 15);
+    gtk_widget_set_margin_end(box, 15);
+    gtk_widget_set_margin_bottom(box, 15);
+
+    GtkWidget *entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "Nome do banco...");
+    GtkWidget *btn_save = gtk_button_new_with_label("Salvar");
+    gtk_widget_set_halign(btn_save, GTK_ALIGN_END);
+
+    gtk_window_set_default_widget(GTK_WINDOW(popup), btn_save);
+    gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
+
+    g_object_set_data(G_OBJECT(btn_save), "entry", entry);
+    g_signal_connect(btn_save, "clicked", G_CALLBACK(criarBD), app);
+
+    gtk_box_append(GTK_BOX(box), entry);
+    gtk_box_append(GTK_BOX(box), btn_save);
+    gtk_window_set_child(GTK_WINDOW(popup), box);
+    gtk_window_present(GTK_WINDOW(popup));
+}
+
+void popup_criarProfessor(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    if (app->popup_criar_existe) return;
+    app->popup_criar_existe = TRUE;
+
+    GtkWidget *popup = gtk_window_new();
+    app->popup = popup;
+    gtk_window_set_title(GTK_WINDOW(popup), "Cadastrar Professor");
+    gtk_window_set_default_size(GTK_WINDOW(popup), 320, 180);
+    gtk_window_set_transient_for(GTK_WINDOW(popup), GTK_WINDOW(app->win));
+    gtk_window_set_modal(GTK_WINDOW(popup), TRUE);
+    g_signal_connect(popup, "destroy", G_CALLBACK(on_popup_destroy), app);
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_top(box, 15);
+    gtk_widget_set_margin_start(box, 15);
+    gtk_widget_set_margin_end(box, 15);
+    gtk_widget_set_margin_bottom(box, 15);
+
+    GtkWidget *entry_nome = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_nome), "Nome do professor...");
+
+    GtkWidget *entry_materia = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_materia), "Matéria / Disciplina...");
+
+    GtkWidget *btn_save = gtk_button_new_with_label("Salvar");
+    gtk_widget_set_halign(btn_save, GTK_ALIGN_END);
+
+    gtk_window_set_default_widget(GTK_WINDOW(popup), btn_save);
+    gtk_entry_set_activates_default(GTK_ENTRY(entry_nome), TRUE);
+    gtk_entry_set_activates_default(GTK_ENTRY(entry_materia), TRUE);
+
+    g_object_set_data(G_OBJECT(btn_save), "campo_nome", entry_nome);
+    g_object_set_data(G_OBJECT(btn_save), "campo_materia", entry_materia);
+    g_signal_connect(btn_save, "clicked", G_CALLBACK(salvarProfessor), app);
+
+    gtk_box_append(GTK_BOX(box), entry_nome);
+    gtk_box_append(GTK_BOX(box), entry_materia);
+    gtk_box_append(GTK_BOX(box), btn_save);
+
+    gtk_window_set_child(GTK_WINDOW(popup), box);
+    gtk_window_present(GTK_WINDOW(popup));
+}
+
+void popup_editarProfessor(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    if (app->popup_criar_existe) return;
+    app->popup_criar_existe = TRUE;
+
+    int target_id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "prof_id"));
+    const char *curr_nome = g_object_get_data(G_OBJECT(btn), "prof_nome");
+    const char *curr_materia = g_object_get_data(G_OBJECT(btn), "prof_materia");
+
+    GtkWidget *popup = gtk_window_new();
+    app->popup = popup;
+    gtk_window_set_title(GTK_WINDOW(popup), "Ficha do Professor / Alterar");
+    gtk_window_set_default_size(GTK_WINDOW(popup), 340, 220);
+    gtk_window_set_transient_for(GTK_WINDOW(popup), GTK_WINDOW(app->win));
+    gtk_window_set_modal(GTK_WINDOW(popup), TRUE);
+    g_signal_connect(popup, "destroy", G_CALLBACK(on_popup_destroy), app);
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(box, 15);
+    gtk_widget_set_margin_start(box, 15);
+    gtk_widget_set_margin_end(box, 15);
+    gtk_widget_set_margin_bottom(box, 15);
+
+    GtkWidget *entry_nome = gtk_entry_new();
+    gtk_editable_set_text(GTK_EDITABLE(entry_nome), curr_nome);
+
+    GtkWidget *entry_materia = gtk_entry_new();
+    gtk_editable_set_text(GTK_EDITABLE(entry_materia), curr_materia);
+
+    GtkWidget *btn_alterar = gtk_button_new_with_label("Alterar Dados");
+    gtk_widget_set_halign(btn_alterar, GTK_ALIGN_END);
+
+    gtk_window_set_default_widget(GTK_WINDOW(popup), btn_alterar);
+    gtk_entry_set_activates_default(GTK_ENTRY(entry_nome), TRUE);
+    gtk_entry_set_activates_default(GTK_ENTRY(entry_materia), TRUE);
+
+    g_object_set_data(G_OBJECT(btn_alterar), "campo_nome", entry_nome);
+    g_object_set_data(G_OBJECT(btn_alterar), "campo_materia", entry_materia);
+    g_object_set_data(G_OBJECT(btn_alterar), "prof_id", GINT_TO_POINTER(target_id));
+    g_signal_connect(btn_alterar, "clicked", G_CALLBACK(salvarAlteracaoProfessor), app);
+
+    gtk_box_append(GTK_BOX(box), gtk_label_new("Nome do Docente:"));
+    gtk_box_append(GTK_BOX(box), entry_nome);
+    gtk_box_append(GTK_BOX(box), gtk_label_new("Disciplina Associada:"));
+    gtk_box_append(GTK_BOX(box), entry_materia);
+    gtk_box_append(GTK_BOX(box), btn_alterar);
+
+    gtk_window_set_child(GTK_WINDOW(popup), box);
+    gtk_window_present(GTK_WINDOW(popup));
+}
+
+void popup_criarSala(GtkButton *btn, gpointer data)
+{
+    AppData *app = data;
+    if (app->popup_criar_existe) return;
+    app->popup_criar_existe = TRUE;
+
+    GtkWidget *popup = gtk_window_new();
+    app->popup = popup;
+    gtk_window_set_title(GTK_WINDOW(popup), "Criar Novo Curso/Sala");
+    gtk_window_set_default_size(GTK_WINDOW(popup), 320, 130);
+    gtk_window_set_transient_for(GTK_WINDOW(popup), GTK_WINDOW(app->win));
+    gtk_window_set_modal(GTK_WINDOW(popup), TRUE);
+    g_signal_connect(popup, "destroy", G_CALLBACK(on_popup_destroy), app);
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_top(box, 15);
+    gtk_widget_set_margin_start(box, 15);
+    gtk_widget_set_margin_end(box, 15);
+    gtk_widget_set_margin_bottom(box, 15);
+
+    GtkWidget *entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "Nome da sala...");
+    GtkWidget *btn_save = gtk_button_new_with_label("Salvar");
+    gtk_widget_set_halign(btn_save, GTK_ALIGN_END);
+
+    gtk_window_set_default_widget(GTK_WINDOW(popup), btn_save);
+    gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
+
+    g_object_set_data(G_OBJECT(btn_save), "entry", entry);
+    g_signal_connect(btn_save, "clicked", G_CALLBACK(criarSala), app);
+
+    gtk_box_append(GTK_BOX(box), entry);
+    gtk_box_append(GTK_BOX(box), btn_save);
+    gtk_window_set_child(GTK_WINDOW(popup), box);
+    gtk_window_present(GTK_WINDOW(popup));
+}
+
+void mostrar_erro(GtkWindow *parent, const char *mensagem) {
+    GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", mensagem);
+    gtk_alert_dialog_show(dialog, parent); g_object_unref(dialog);
+}
+
+// ============================================================================
+// INTERFACE GRÁFICA PRINCIPAL
+// ============================================================================
+
+void interface(GtkApplication *application, gpointer user_data)
+{
+    AppData *data = g_malloc0(sizeof(AppData));
+
+    GtkWidget *win = gtk_application_window_new(application);
+    data->win = win;
+    g_object_set_data_full(G_OBJECT(win), "app-data", data, g_free);
+    gtk_window_set_title(GTK_WINDOW(win), "Gerenciador Escolar Pro");
+    gtk_window_set_default_size(GTK_WINDOW(win), 1000, 700);
+
+    GtkWidget *stack = gtk_stack_new();
+    data->stack = stack; 
+
+    /* ----- STACK 1: MENU PRINCIPAL (BANCOS DE DADOS) ----- */
+    GtkWidget *pagina_bd = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_top(pagina_bd, 15);
+    gtk_widget_set_margin_start(pagina_bd, 15);
+    gtk_widget_set_margin_end(pagina_bd, 15);
+    gtk_widget_set_margin_bottom(pagina_bd, 15);
+
+    GtkWidget *nav_bd = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    GtkWidget *box_btn_bd = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_widget_set_hexpand(box_btn_bd, TRUE);
+    gtk_widget_set_halign(box_btn_bd, GTK_ALIGN_END);
+
+    GtkWidget *btn_criar = gtk_button_new_with_label("Criar");
+    GtkWidget *btn_excluir = gtk_button_new_with_label("Excluir");
+    data->btn_criar = btn_criar; data->btn_excluir = btn_excluir;
+
+    GtkWidget *container = gtk_flow_box_new();
+    data->container_bd = container;
+    gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(container), GTK_SELECTION_NONE);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(container), 15);
+    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(container), 15);
+    
+    GtkWidget *scroll_bd = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll_bd), container);
+    gtk_widget_set_hexpand(scroll_bd, TRUE); gtk_widget_set_vexpand(scroll_bd, TRUE);
+
+    GtkWidget *overlay_bd = gtk_overlay_new();
+    gtk_widget_set_hexpand(overlay_bd, TRUE);
+    gtk_widget_set_vexpand(overlay_bd, TRUE);
+    gtk_overlay_set_child(GTK_OVERLAY(overlay_bd), scroll_bd);
+    data->overlay_bd = overlay_bd;
+    data->label_vazio_bd = NULL;
+
+    g_signal_connect(btn_criar, "clicked", G_CALLBACK(btn_criar_clicked), data);
+    g_signal_connect(btn_excluir, "clicked", G_CALLBACK(btn_excluir_clicked), data);
+
+    gtk_box_append(GTK_BOX(box_btn_bd), btn_criar);
+    gtk_box_append(GTK_BOX(box_btn_bd), btn_excluir);
+    gtk_box_append(GTK_BOX(nav_bd), box_btn_bd);
+    gtk_box_append(GTK_BOX(pagina_bd), nav_bd);
+    gtk_box_append(GTK_BOX(pagina_bd), overlay_bd);
+
+    /* ----- STACK 2: MENU INTERNO (SALAS DO BANCO SELECIONADO) ----- */
+    GtkWidget *pagina_salas = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_top(pagina_salas, 15);
+    gtk_widget_set_margin_start(pagina_salas, 15);
+    gtk_widget_set_margin_end(pagina_salas, 15);
+    gtk_widget_set_margin_bottom(pagina_salas, 15);
+
+    GtkWidget *nav_salas = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    GtkWidget *btn_voltar1 = gtk_button_new_from_icon_name ("go-previous-symbolic");
+    gtk_widget_add_css_class(GTK_WIDGET(btn_voltar1), "flat");
+    
+    GtkWidget *box_btn_salas = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_widget_set_hexpand(box_btn_salas, TRUE);
+    gtk_widget_set_halign(box_btn_salas, GTK_ALIGN_END);
+
+    GtkWidget *btn_criar_sala = gtk_button_new_with_label("Criar");
+    GtkWidget *btn_excluir_sala = gtk_button_new_with_label("Excluir");
+    data->btn_criar_sala = btn_criar_sala; data->btn_excluir_sala = btn_excluir_sala;
+
+    GtkWidget *container_salas = gtk_flow_box_new();
+    data->container_salas = container_salas;
+    gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(container_salas), GTK_SELECTION_NONE);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(container_salas), 15);
+    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(container_salas), 15);
+
+    GtkWidget *scroll_salas = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll_salas), container_salas);
+    gtk_widget_set_hexpand(scroll_salas, TRUE); gtk_widget_set_vexpand(scroll_salas, TRUE);
+
+    GtkWidget *overlay_salas = gtk_overlay_new();
+    gtk_widget_set_hexpand(overlay_salas, TRUE);
+    gtk_widget_set_vexpand(overlay_salas, TRUE);
+    gtk_overlay_set_child(GTK_OVERLAY(overlay_salas), scroll_salas);
+    data->overlay_salas = overlay_salas;
+    data->label_vazio_sala = NULL;
+
+    g_signal_connect(btn_voltar1, "clicked", G_CALLBACK(btn_voltar_clicked), data);
+    g_signal_connect(btn_criar_sala, "clicked", G_CALLBACK(btn_criar_sala_clicked), data);
+    g_signal_connect(btn_excluir_sala, "clicked", G_CALLBACK(btn_excluir_sala_clicked), data);
+
+    gtk_box_append(GTK_BOX(nav_salas), btn_voltar1);
+    gtk_box_append(GTK_BOX(box_btn_salas), btn_criar_sala);
+    gtk_box_append(GTK_BOX(box_btn_salas), btn_excluir_sala);
+    gtk_box_append(GTK_BOX(nav_salas), box_btn_salas);
+    
+    gtk_box_append(GTK_BOX(pagina_salas), nav_salas);
+    gtk_box_append(GTK_BOX(pagina_salas), overlay_salas);
+
+    /* ----- STACK 3: TABELA (DADOS DA SALA SELECIONADA) ----- */
+    GtkWidget *pagina_tabela = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_top(pagina_tabela, 15);
+    gtk_widget_set_margin_start(pagina_tabela, 15);
+    gtk_widget_set_margin_end(pagina_tabela, 15);
+    gtk_widget_set_margin_bottom(pagina_tabela, 15);
+
+    GtkWidget *tabela = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(tabela), 12);
+    gtk_grid_set_row_spacing(GTK_GRID(tabela), 10);
+    data->tabela = tabela;
+
+    GtkWidget *nav_tabela = gtk_center_box_new();
+    GtkWidget *box_btn_tabela = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_widget_set_halign(box_btn_tabela, GTK_ALIGN_END);
+    
+    GtkWidget *btn_criar_dado = gtk_button_new_with_label("Criar");
+    GtkWidget *btn_excluir_dado = gtk_button_new_with_label("Excluir");
+    GtkWidget *btn_voltar2 = gtk_button_new_from_icon_name("go-previous-symbolic");
+    data->btn_criar_dado = btn_criar_dado; data->btn_excluir_dado = btn_excluir_dado;
+    gtk_widget_add_css_class(GTK_WIDGET(btn_voltar2), "flat");
+
+    GtkWidget *btn_procurar = gtk_button_new_from_icon_name("system-search");
+    gtk_widget_add_css_class(GTK_WIDGET(btn_procurar), "flat");
+    GtkWidget *campo_busca = gtk_entry_new();
+    GtkWidget *box_procura = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    
+    gtk_widget_set_visible(campo_busca, FALSE);
+    
+    data->campo_busca = campo_busca; data->btn_procurar = btn_procurar;
+    gtk_widget_set_hexpand(box_procura, TRUE);
+    gtk_widget_set_halign(box_procura, GTK_ALIGN_BASELINE_CENTER);
+
+    GtkWidget *scroll_tabela = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll_tabela), tabela);
+    gtk_widget_set_hexpand(scroll_tabela, TRUE); gtk_widget_set_vexpand(scroll_tabela, TRUE);
+
+    GtkWidget *overlay_tabela = gtk_overlay_new();
+    gtk_widget_set_hexpand(overlay_tabela, TRUE);
+    gtk_widget_set_vexpand(overlay_tabela, TRUE);
+    gtk_overlay_set_child(GTK_OVERLAY(overlay_tabela), scroll_tabela);
+    data->overlay_tabela = overlay_tabela;
+    data->label_vazio_tabela = NULL;
+
+    g_signal_connect(btn_voltar2, "clicked", G_CALLBACK(btn_voltar_clicked), data);
+    g_signal_connect(btn_criar_dado, "clicked", G_CALLBACK(btn_criar_dado_clicked), data);
+    g_signal_connect(btn_excluir_dado, "clicked", G_CALLBACK(btn_excluir_dado_clicked), data);
+    
+    g_signal_connect(btn_procurar, "clicked", G_CALLBACK(on_btn_procurar_clicked), data);
+    g_signal_connect(campo_busca, "changed", G_CALLBACK(on_campo_busca_changed), data);
+    
+    gtk_widget_set_halign(btn_voltar2, GTK_ALIGN_START);
+    gtk_widget_set_halign(box_procura, GTK_ALIGN_CENTER);
+    gtk_widget_set_halign(box_btn_tabela, GTK_ALIGN_END);
+
+    gtk_box_append(GTK_BOX(box_procura), campo_busca);
+    gtk_box_append(GTK_BOX(box_procura), btn_procurar);
+    
+    gtk_box_append(GTK_BOX(box_btn_tabela), btn_criar_dado);
+    gtk_box_append(GTK_BOX(box_btn_tabela), btn_excluir_dado);
+
+    gtk_center_box_set_start_widget(GTK_CENTER_BOX(nav_tabela), btn_voltar2);
+    gtk_center_box_set_center_widget(GTK_CENTER_BOX(nav_tabela), box_procura);
+    gtk_center_box_set_end_widget(GTK_CENTER_BOX(nav_tabela), box_btn_tabela);
+    
+    gtk_box_append(GTK_BOX(pagina_tabela), nav_tabela);
+    gtk_box_append(GTK_BOX(pagina_tabela), overlay_tabela);
+
+    /* ----- ADICIONANDO PÁGINAS AO STACK ----- */
+    gtk_stack_add_named(GTK_STACK(stack), pagina_bd, "menu_bd");
+    gtk_stack_add_named(GTK_STACK(stack), pagina_salas, "menu_salas");
+    gtk_stack_add_named(GTK_STACK(stack), pagina_tabela, "tabela");
+
+    procurarBD(NULL, data);
+
+    gtk_window_set_child(GTK_WINDOW(win), stack);
+    gtk_window_present(GTK_WINDOW(win));
+}
+
+int main(int argc, char **argv)
+{
+    GtkApplication *app;
+    int status;
+    init_base_dir();
+    app = gtk_application_new("com.exemplo.loading", G_APPLICATION_DEFAULT_FLAGS);
+    g_signal_connect(app, "activate", G_CALLBACK(interface), NULL);
+    status = g_application_run(G_APPLICATION(app), argc, argv);
+    g_object_unref(app);
+    return status;
+}
